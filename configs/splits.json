@@ -1,0 +1,7 @@
+{
+  "note": "Proposed disjoint local pools. Inclusive endpoints. Group episode descendants together.",
+  "train": [100000, 199999],
+  "dev": [200000, 200099],
+  "holdout": [300000, 300099],
+  "official_reserved": [1000, 1049]
+}

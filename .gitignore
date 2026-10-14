@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+submission/logs/
+submission/results.json
+submission/checkpoint/*
+!submission/checkpoint/README.md
+submission/MANIFEST.sha256
+*.tar.gz
+runs/

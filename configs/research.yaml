@@ -1,0 +1,67 @@
+# Proposed engineering defaults, NOT reproduced paper hyperparameters.
+# Consuming training code must be implemented; this is not an upstream config.
+model:
+  # Owner decision 2026-10-14: official leaderboard shows pi0.5 full fine-tune at 0.405 mean
+  # success vs GR00T at 0.013 (configs/official_baselines.json), so openpi pi0.5 is the main
+  # M1 baseline and GR00T N1.7 is the secondary lane. This reverses DESIGN.md section 1.
+  main: openpi_pi05
+  model_id: null               # resolve the exact openpi pi0.5 base checkpoint + license before training
+  checkpoint_revision: null    # resolve, inspect license, and pin before training
+  repository_commit: null
+  secondary: groot_n1_7
+  secondary_model_id: nvidia/GR00T-N1.7-3B
+  optional_memory_baseline: openpi_pi05
+interface:
+  frequency_hz: 20
+  cameras: [head, left_wrist, right_wrist]
+  rgb_resolution: [256, 256]
+  depth: false
+  action_mode: end_effector_delta
+  semantic_contract_verified: false
+  expected_action_dim: 14
+  expected_state_dim: 36
+  expected_gripper_state_dim: 2
+imitation:
+  prediction_horizon_if_supported: 16
+  execute_steps: 4
+  generated_fraction: 0.5
+  sample_family_then_episode: true
+rl:
+  enabled: false  # after all-task imitation baseline and reward audit
+  method: td3_residual_inspired_by_resfit
+  freeze_base: true
+  freeze_visual_encoder: true
+  execute_steps: 1
+  initial_residual_fraction_of_finite_command_span: 0.05
+  initial_gripper_residual: false
+  reward: unmodified_environment_return
+  terminal_at_challenge_budget: true
+sampler:
+  method: sgs_inspired_mixture
+  pilot_configurations_per_task: 64
+  window: 20
+  minimum_attempts_per_configuration: 2
+  tau: 0.5
+  kappa: 2.0
+  temperature: 1.0
+  epsilon: 0.000001
+  mixture: {sgs: 0.5, uniform: 0.25, poor_quality_success: 0.25}
+  unavailable_quality_mass_goes_to: uniform
+cousins:
+  appearance: true
+  ordinary_reset_collection: true
+  geometric_changes: false
+  dynamics_changes: false
+approvals:
+  written_organizer_authorization: null
+  privileged_training_teacher: false
+  intermediate_state_resets: false
+  alternate_training_reward: false
+optional_branches:
+  imprint: false
+  accrue_transfer: false
+  cosmos: false
+selection:
+  pilot_tasks: [LiftPot, CubeHandover]
+  required_final_tasks: all_eight
+  use_official_seeds_for_selection: false

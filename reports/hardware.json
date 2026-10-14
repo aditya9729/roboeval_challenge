@@ -1,0 +1,30 @@
+{
+  "python": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 13.3.0]",
+  "platform": "Linux-6.8.0-100-generic-x86_64-with-glibc2.39",
+  "cpu": {
+    "model": "AMD EPYC 7742 64-Core Processor",
+    "sockets": "2",
+    "cores_per_socket": "64",
+    "threads_per_core": "1",
+    "cpus": "128",
+    "flags_avx2": true
+  },
+  "gpu": {
+    "gpus": [
+      {
+        "name": "NVIDIA A100-SXM4-80GB",
+        "memory": "81920 MiB",
+        "driver": "580.126.16"
+      }
+    ],
+    "count": 1
+  },
+  "mem_gb": 2101.2,
+  "vendor_root": "/workspace/roboeval/vendor/RoboEval",
+  "vendor_commit": "c8b79598c9fb9021652128020517d1847abe4c95",
+  "vendor_dirty": false,
+  "locks": {
+    "sim_requirements.lock.txt": "ea6e217e76fbbafdcb3119baba9d6ccf94cedb00f7b42e35d27a6bb1de7ee0b3",
+    "train_requirements.lock.txt": "1ceadf4f7243c3fe54c2bf2b20c2878a665b1834cfddb2f25f27eb3b7deee74e"
+  }
+}

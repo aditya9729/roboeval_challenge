@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "source_commit": "c8b79598c9fb9021652128020517d1847abe4c95",
+  "control_frequency_hz": 20,
+  "layout": [
+    "left_pos_x",
+    "left_pos_y",
+    "left_pos_z",
+    "left_rot_x",
+    "left_rot_y",
+    "left_rot_z",
+    "right_pos_x",
+    "right_pos_y",
+    "right_pos_z",
+    "right_rot_x",
+    "right_rot_y",
+    "right_rot_z",
+    "left_gripper",
+    "right_gripper"
+  ],
+  "rotation_representation": "rotvec",
+  "rotation_composition": "premultiply_pelvis_frame",
+  "position_frame": "pelvis",
+  "delta_reference": "actuator_ctrl_targets",
+  "env_bounds": {
+    "low": [
+      -25.0,
+      -25.0,
+      -25.0,
+      -3.1415927410125732,
+      -3.1415927410125732,
+      -3.1415927410125732,
+      -25.0,
+      -25.0,
+      -25.0,
+      -3.1415927410125732,
+      -3.1415927410125732,
+      -3.1415927410125732,
+      0.0,
+      0.0
+    ],
+    "high": [
+      25.0,
+      25.0,
+      25.0,
+      3.1415927410125732,
+      3.1415927410125732,
+      3.1415927410125732,
+      25.0,
+      25.0,
+      25.0,
+      3.1415927410125732,
+      3.1415927410125732,
+      3.1415927410125732,
+      1.0,
+      1.0
+    ]
+  },
+  "guard_bounds": {
+    "low": [
+      -0.045713993459940185,
+      -0.0565016957372434,
+      -0.06080190807580982,
+      -0.11910668555647168,
+      -0.13340516842901784,
+      -0.19541353721171684,
+      -0.047856229692697594,
+      -0.07507750388234871,
+      -0.06581340998411193,
+      -0.12966765154153148,
+      -0.14721211437135956,
+      -0.21475384332239678,
+      0.0,
+      0.0
+    ],
+    "high": [
+      0.04389869645238037,
+      0.061249023005369836,
+      0.05838660031557254,
+      0.12064066398888987,
+      0.12624983437359724,
+      0.18884698007256132,
+      0.04751069262623819,
+      0.0676136640831837,
+      0.060594764649868744,
+      0.13808311436325504,
+      0.13156789947301256,
+      0.22338620670140028,
+      1.0,
+      1.0
+    ]
+  },
+  "guard_bounds_provenance": {
+    "statistics_file": "data_manifests/action_statistics.json",
+    "statistics_sha256": "290a60fe416f785d33fd6ef95d8b6d88a6affaf926b6f93c509d772126afbe6b",
+    "rule": "dims 0-11: pooled [p0.1, p99.9] over all 8 PositionAndOrientation variants, expanded symmetrically by 25% of the span; gripper dims 12-13 fixed to [0, 1]"
+  },
+  "gripper": {
+    "command_range": [
+      0.0,
+      1.0
+    ],
+    "discrete": true,
+    "open_command": 0,
+    "closed_command": 1,
+    "verified": true
+  },
+  "joint_speed_limit_rad_per_step": 0.10875,
+  "finite_required": true,
+  "dataset_alignment": {
+    "dataset": "roboeval_ee_delta_20hz_scaled",
+    "frame_t_state_is": "observation_after_actions_t",
+    "bc_pairing": "obs=frame[t-1] (env reset observation for t=0) -> actions[t]",
+    "observation_source": "absolute_joint_500hz_replay (vendor examples/8_replay_to_lerobot.py)",
+    "verified_by": "scripts/replay_parity.py alignment metrics"
+  }
+}

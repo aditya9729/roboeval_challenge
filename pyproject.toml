@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roboeval-entry"
+version = "0.1.0"
+description = "RoboEval CoRL 2026 Track 2 entry"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pyyaml"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

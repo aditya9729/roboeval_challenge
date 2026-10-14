@@ -1,0 +1,18 @@
+{
+  "verified_date": "2026-10-14",
+  "repository": "https://github.com/Robo-Eval/RoboEval.git",
+  "reference": "corl2026-challenge",
+  "expected_commit": "c8b79598c9fb9021652128020517d1847abe4c95",
+  "control_frequency_hz": 20,
+  "variation": "PositionAndOrientation",
+  "official_seed_start": 1000,
+  "official_seed_end_inclusive": 1049,
+  "episodes_per_family": 50,
+  "deadline_utc": "2026-11-02T11:59:00Z",
+  "archive_limit_bytes_exclusive": 5000000000,
+  "tasks_budget_seconds": {
+    "LiftPot": 10, "LiftTray": 10, "StackTwoBlocks": 20,
+    "StackSingleBookShelf": 40, "CubeHandover": 20, "PackBox": 20,
+    "PickSingleBookFromTable": 15, "RotateValve": 20
+  }
+}

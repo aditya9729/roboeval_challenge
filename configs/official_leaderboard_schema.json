@@ -1,0 +1,72 @@
+[
+  {
+    "key": "success",
+    "label": "Success",
+    "direction": "max"
+  },
+  {
+    "key": "tp",
+    "label": "TP",
+    "direction": "max"
+  },
+  {
+    "key": "bavd",
+    "label": "BAVD",
+    "direction": "min"
+  },
+  {
+    "key": "bgvd",
+    "label": "BGVD",
+    "direction": "min"
+  },
+  {
+    "key": "cpl",
+    "label": "CPL",
+    "direction": "min"
+  },
+  {
+    "key": "ct",
+    "label": "CT",
+    "direction": "min"
+  },
+  {
+    "key": "ecc",
+    "label": "ECC",
+    "direction": "min"
+  },
+  {
+    "key": "jpl",
+    "label": "JPL",
+    "direction": "min"
+  },
+  {
+    "key": "mcj",
+    "label": "MCJ",
+    "direction": "min"
+  },
+  {
+    "key": "mjj",
+    "label": "MJJ",
+    "direction": "min"
+  },
+  {
+    "key": "opl",
+    "label": "OPL",
+    "direction": "min"
+  },
+  {
+    "key": "scc",
+    "label": "SCC",
+    "direction": "min"
+  },
+  {
+    "key": "sc",
+    "label": "SC",
+    "direction": "min"
+  },
+  {
+    "key": "tl",
+    "label": "TL",
+    "direction": "min"
+  }
+]
