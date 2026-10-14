@@ -1,0 +1,48 @@
+# Experiment and evaluation log
+
+Append-only. One entry per run that touched the simulator, the GPU, or produced a score. Every entry
+records: ID, date, purpose, exact command, inputs (commit/checkpoint/data hashes), seeds/split,
+compute, outputs (paths + sha256), result, and verdict. Scores on non-official seeds are local
+diagnostics, never official results. Negative results stay in the log.
+
+Conventions: `E<NNN>` = experiment/evaluation run; `T<NNN>` = training run. Artifacts live under
+`/workspace/roboeval/runs/<id>_<slug>/` unless noted. Repo commit refers to `/root/roboeval-entry`.
+
+---
+
+## E001 — official install check (template hold policy, LiftPot, 2 official seeds)
+- Date: 2026-10-14. Purpose: organizers' install sanity check (Getting Started step 2). Not model selection.
+- Command: `python -m roboeval.challenge.evaluate --submission examples/challenge_submission --tasks LiftPot --episodes 2 --output-dir /workspace/roboeval/runs/official_install_check --overwrite` (sim env, `MUJOCO_GL=egl`)
+- Inputs: vendor `c8b7959`; template policy; seeds 1000, 1001 (official; sanity use only).
+- Compute: 1 CPU process + EGL on A100; 22 s wall.
+- Output: `runs/official_install_check/{results.json,logs/}`; results.json sha256 `eb2c661f…6b74e`.
+- Result: success 0.000, tp 0.000, 0 errors, RDS 0.000. Verdict: plumbing OK (expected zero).
+
+## E002 — non-official plumbing run (template hold policy, 8 families × dev seeds 200000–200001, 3 cams)
+- Date: 2026-10-14. Purpose: verify the local wrapper + seed guard + all 8 envs with cameras.
+- Command: `ROBOEVAL_VENDOR=… SIM_PYTHON=… EVAL_WORKERS=1 EVAL_GPUS=0 bash scripts/run_local_eval.sh ./submission configs/dev_smoke_seeds.json dev /workspace/roboeval/runs/m0_plumbing_dev_smoke`
+- Inputs: vendor `c8b7959`; template policy; dev pool seeds.
+- Compute: 1 worker, A100 EGL; 171 s wall (6 200 env steps).
+- Output: `runs/m0_plumbing_dev_smoke/{results.json,logs/,stdout.txt}`; results.json sha256 `622f7edf…7c9a9`.
+- Result: all 8 families 2/2 episodes, 0 errors, RDS 0.000 (hold policy; safety 1.0, efficiency 0.80–0.91, coordination 1.0, outcome 0). Verdict: plumbing OK.
+
+## E003 — contract probe (LiftPot PR, train-pool seed 100000)
+- Date: 2026-10-14. Purpose: measure gripper semantics, delta frame, speed clip, determinism, step cost.
+- Command: `scripts/probe_contract.py` (sim env). Output: `runs/m0_contract_probe/probe.json` sha256 `447d1b5a…2158`, `contracts/probe_summary.md`.
+- Result: gripper 0=open/1=closed; clip 0.10875 rad/step; same-seed bit-identical; 7.8 ms/step state-only, 17.5 ms/step 3 cams. Verdict: contract fixed in `contracts/action_spec.json`.
+
+## E004 — demonstration replay parity (8 families × first 5 dataset episodes)
+- Date: 2026-10-14. Purpose: converted (dataset ee-delta → challenge env) vs organizer reference, plus direct 500 Hz replay; dataset alignment check.
+- Command: pinned math env, `scripts/replay_parity.py --episodes-per-family 5 --out /workspace/roboeval/runs/m0_replay_parity` (sim env).
+- Inputs: dataset HF commit `918b4072…`; raw demos 1.0.0; vendor `c8b7959`.
+- Output: `runs/m0_replay_parity/parity.{json,md}`; parity.json sha256 `1b4e4adb…658af`.
+- Result: converted 38/40 success, 40/40 exact match with `human_reference_episodes.json`; direct 35/40; shifted pairing `frame[t-1] → actions[t]` confirmed (first-10-step qpos error 3e-4–6e-3 vs 6e-3–6e-2). Verdict: replay contract verified; alignment recorded in action_spec.
+
+## T001 — overfit gate: pi0.5 base → 4 LiftPot PR training episodes (595 samples)
+- Date: 2026-10-14. Purpose: catch mapping bugs in the data/model adapter; NOT a generalization claim.
+- Command: `scripts/openpi_run.py inspect|norm-stats|train pi05_roboeval_overfit --exp-name gate01 --overwrite` (openpi env; config registered in `roboeval_entry.training.openpi_bridge`).
+- Inputs: openpi `215abfb2`; base weights `pi05_base` converted to PyTorch bf16 (`/workspace/roboeval/models/pi05_base_pytorch/model.safetensors`, 7.23 GB, sha256 `f4e5e8c223a15c5c…`); dataset HF `918b4072…`, 4 train-split LiftPot episodes; obs=frame[t-1] → actions[t:t+16]; state = qpos[18]; images head/left_wrist/right_wrist 256→224.
+- Config: Pi0Config(pi05=True, action_horizon=16), batch 16, 400 steps, AdamW lr 5e-5 (20 warmup), bf16, grad checkpointing, no EMA.
+- Compute: 1× A100-80GB; peak 34.5 GB allocated / 35.2 GB reserved; ~3.4 s/step (data-loader bound: 42 ms/sample PNG-from-parquet); 27.5 min wall.
+- Output: `runs/T001_overfit_liftpot4/{train_stdout.txt,loss_curve.json,gpu_mem.log}`; checkpoints `/workspace/roboeval/models/checkpoints/pi05_roboeval_overfit/gate01/{200,399,400}` (~20 GB each incl. optimizer).
+- Result: loss first-20 mean 0.191 → last-20 mean 0.065 (min 0.038). Verdict: adapter trains; gate passed pending open-loop (E005) and closed-loop (E006) checks.
