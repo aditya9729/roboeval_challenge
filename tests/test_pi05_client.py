@@ -73,6 +73,79 @@ class Pi05RemoteAdapterTests(unittest.TestCase):
         self.assertNotEqual(adapter._noise_base, base1)
 
 
+class _ChunkClient:
+    """Returns unique chunks so prefix propagation is observable."""
+
+    def __init__(self):
+        self.requests = []
+        self._n = 0
+
+    def infer(self, request):
+        self.requests.append(dict(request))
+        self._n += 1
+        a = np.arange(16 * 14, dtype=np.float32).reshape(16, 14) + self._n * 1000
+        a[:, 12:14] = 0.0
+        return {"actions": a}
+
+
+class InpaintClientTests(unittest.TestCase):
+    def test_disabled_sends_no_prefix(self):
+        client = _ChunkClient()
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    inpaint_steps=0)
+        adapter.reset(CTX)
+        for _ in range(8):
+            adapter.act(_obs())
+        assert all("prefix_actions" not in r for r in client.requests)
+
+    def test_prefix_is_unexecuted_continuation(self):
+        client = _ChunkClient()
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    inpaint_steps=4)
+        adapter.reset(CTX)
+        for _ in range(5):
+            adapter.act(_obs())
+        self.assertNotIn("prefix_actions", client.requests[0])
+        first_chunk = np.arange(224, dtype=np.float32).reshape(16, 14) + 1000
+        first_chunk[:, 12:14] = 0.0
+        np.testing.assert_array_equal(
+            client.requests[1]["prefix_actions"], first_chunk[4:8])
+        self.assertEqual(client.requests[1]["prefix_actions"].shape, (4, 14))
+        self.assertEqual(client.requests[1]["prefix_actions"].dtype, np.float32)
+
+    def test_reset_and_trigger_clear_prefix(self):
+        from roboeval_entry.control.gripper_rule import GripperCorrectionRule
+
+        client = _ChunkClient()
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    inpaint_steps=4)
+        adapter.reset(CTX)
+        for _ in range(6):
+            adapter.act(_obs())
+        adapter.reset(CTX)
+        adapter.act(_obs())
+        self.assertNotIn("prefix_actions",
+                         client.requests[len(client.requests) - 1])
+
+        # gripper-rule trigger also clears the prefix flag
+        class _GC(_ChunkClient):
+            def infer(self, req):
+                out = super().infer(req)
+                out["actions"][:, 12:14] = 1.0
+                return out
+
+        client2 = _GC()
+        rule = GripperCorrectionRule(close_steps=6, closed_threshold=0.02,
+                                     open_steps=2, cooldown_steps=2)
+        adapter2 = Pi05RemoteAdapter(execute_steps=4, client=client2,
+                                     inpaint_steps=4, gripper_rule=rule)
+        adapter2.reset(CTX)
+        for _ in range(7):
+            adapter2.act(_obs())   # trigger at act 6 -> next infer has no prefix
+        self.assertNotIn("prefix_actions", client2.requests[-1])
+        self.assertGreaterEqual(len(client2.requests), 2)
+
+
 class GripperRuleWiringTests(unittest.TestCase):
     def test_trigger_forces_replan(self):
         from roboeval_entry.control.gripper_rule import GripperCorrectionRule

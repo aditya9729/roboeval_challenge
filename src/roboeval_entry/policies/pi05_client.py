@@ -49,8 +49,11 @@ class Pi05RemoteAdapter:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000,
                  execute_steps: int = 4,
                  cameras: Sequence[str] = ("head", "left_wrist", "right_wrist"),
-                 client=None, gripper_rule=None):
+                 client=None, gripper_rule=None, inpaint_steps: int = 0):
+        if execute_steps + inpaint_steps > 16:
+            raise ValueError("execute_steps + inpaint_steps must be <= 16")
         self.execute_steps = execute_steps
+        self.inpaint_steps = inpaint_steps
         self.cameras = tuple(cameras)
         if client is None:
             client = RelaxedWebsocketClient(host=host, port=port)
@@ -60,6 +63,8 @@ class Pi05RemoteAdapter:
         self._prompt = ""
         self._noise_base = 0
         self._calls = 0
+        self._last_chunk = None
+        self._prefix_allowed = False
 
     def reset(self, ctx: EpisodeContext) -> None:
         self._prompt = ctx.instruction
@@ -68,6 +73,8 @@ class Pi05RemoteAdapter:
             self._gripper_rule.reset()
         self._noise_base = random.getrandbits(62)
         self._calls = 0
+        self._last_chunk = None
+        self._prefix_allowed = False
 
     def act(self, obs: Mapping[str, np.ndarray]) -> np.ndarray:
         if self._queue.remaining == 0:
@@ -81,11 +88,17 @@ class Pi05RemoteAdapter:
                 "prompt": self._prompt,
                 "noise_seed": (self._noise_base + self._calls) % (2 ** 62),
             })
+            if (self.inpaint_steps > 0 and self._prefix_allowed
+                    and self._last_chunk is not None):
+                request["prefix_actions"] = self._last_chunk[
+                    self.execute_steps: self.execute_steps + self.inpaint_steps]
             self._calls += 1
             result = self._client.infer(request)
             chunk = np.asarray(result["actions"], dtype=np.float32)
             if chunk.shape != (16, 14):
                 raise ValueError(f"expected actions (16,14), got {chunk.shape}")
+            self._last_chunk = chunk
+            self._prefix_allowed = True
             self._queue.push(chunk)
         action = self._queue.pop()
         if self._gripper_rule is not None:
@@ -93,4 +106,5 @@ class Pi05RemoteAdapter:
                 action, obs["proprioception_grippers"])
             if triggered:
                 self._queue.reset()
+                self._prefix_allowed = False
         return action
