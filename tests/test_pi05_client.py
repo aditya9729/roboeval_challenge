@@ -73,5 +73,24 @@ class Pi05RemoteAdapterTests(unittest.TestCase):
         self.assertNotEqual(adapter._noise_base, base1)
 
 
+class GripperRuleWiringTests(unittest.TestCase):
+    def test_trigger_forces_replan(self):
+        from roboeval_entry.control.gripper_rule import GripperCorrectionRule
+
+        client = _FakeClient()
+        rule = GripperCorrectionRule(close_steps=10, closed_threshold=0.02,
+                                     open_steps=6, cooldown_steps=20)
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    gripper_rule=rule)
+        adapter.reset(CTX)
+        obs = _obs()  # grippers read 0.0 = closed on empty air
+        # fake chunks command gripper=1.0 -> failed grasp detected at step 10
+        for _ in range(10):
+            adapter.act(obs)
+        self.assertEqual(rule.triggers.tolist(), [1, 1])
+        adapter.act(obs)   # queue cleared -> extra infer
+        self.assertEqual(len(client.requests), 4)  # steps 1,5,9 -> 3 infers + this
+
+
 if __name__ == "__main__":
     unittest.main()

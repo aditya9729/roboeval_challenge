@@ -49,12 +49,13 @@ class Pi05RemoteAdapter:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000,
                  execute_steps: int = 4,
                  cameras: Sequence[str] = ("head", "left_wrist", "right_wrist"),
-                 client=None):
+                 client=None, gripper_rule=None):
         self.execute_steps = execute_steps
         self.cameras = tuple(cameras)
         if client is None:
             client = RelaxedWebsocketClient(host=host, port=port)
         self._client = client
+        self._gripper_rule = gripper_rule
         self._queue = ActionChunkQueue(execute_steps)
         self._prompt = ""
         self._noise_base = 0
@@ -63,6 +64,8 @@ class Pi05RemoteAdapter:
     def reset(self, ctx: EpisodeContext) -> None:
         self._prompt = ctx.instruction
         self._queue.reset()
+        if self._gripper_rule is not None:
+            self._gripper_rule.reset()
         self._noise_base = random.getrandbits(62)
         self._calls = 0
 
@@ -84,4 +87,10 @@ class Pi05RemoteAdapter:
             if chunk.shape != (16, 14):
                 raise ValueError(f"expected actions (16,14), got {chunk.shape}")
             self._queue.push(chunk)
-        return self._queue.pop()
+        action = self._queue.pop()
+        if self._gripper_rule is not None:
+            action, triggered = self._gripper_rule.apply(
+                action, obs["proprioception_grippers"])
+            if triggered:
+                self._queue.reset()
+        return action

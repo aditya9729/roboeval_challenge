@@ -50,6 +50,8 @@ def main() -> int:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--execute-steps", type=int, default=4)
+    p.add_argument("--gripper-rule", action="store_true")
+    p.add_argument("--gripper-rule-params", default=None)
     args = p.parse_args()
 
     ckpt = Path(args.checkpoint_dir)
@@ -70,6 +72,9 @@ def main() -> int:
         "port": args.port,
         "execute_steps": args.execute_steps,
         "model_sha256": _sha256(weights),
+        "gripper_rule": (json.loads(args.gripper_rule_params)
+                         if args.gripper_rule and args.gripper_rule_params
+                         else ({} if args.gripper_rule else None)),
         "staged_at": datetime.now(timezone.utc).isoformat(),
     }
     out = sub / "checkpoint" / "pi05_server.json"

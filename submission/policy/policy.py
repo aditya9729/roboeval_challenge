@@ -36,8 +36,14 @@ def make_policy(checkpoint_dir: Path, metadata: Dict[str, Any], client=None):
             f"staged {info['model_sha256']}")
     cams = metadata["interface"]["observation"]["cameras"]
     cameras = tuple(c["name"] for c in cams)
+    rule = None
+    if info.get("gripper_rule") is not None:
+        from roboeval_entry.control.gripper_rule import GripperCorrectionRule
+
+        rule = GripperCorrectionRule(**info["gripper_rule"])
     adapter = Pi05RemoteAdapter(
         host=info["host"], port=info["port"],
-        execute_steps=info["execute_steps"], cameras=cameras, client=client)
+        execute_steps=info["execute_steps"], cameras=cameras, client=client,
+        gripper_rule=rule)
     guard = ActionGuard(load_action_spec(_POLICY_DIR / "action_spec.json"))
     return OfficialPolicyBridge(adapter, ObservationSchema(cameras), guard)
