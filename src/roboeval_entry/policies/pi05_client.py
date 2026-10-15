@@ -16,6 +16,35 @@ from roboeval_entry.control.chunk import ActionChunkQueue
 from roboeval_entry.policies.base import EpisodeContext
 
 
+class RelaxedWebsocketClient:
+    """Same wire protocol as openpi_client.WebsocketClientPolicy but with the
+    client's keepalive pings disabled; under multiple eval workers the async
+    server runs infer on its event loop and can exceed the 20 s default ping
+    timeout. Reimplemented here so vendor code stays untouched."""
+
+    def __init__(self, host: str, port: int):
+        import websockets.sync.client
+        from openpi_client import msgpack_numpy
+
+        self._packer = msgpack_numpy.Packer()
+        self._ws = websockets.sync.client.connect(
+            f"ws://{host}:{port}", compression=None, max_size=None,
+            ping_interval=None)
+        self._server_metadata = msgpack_numpy.unpackb(self._ws.recv())
+
+    def get_server_metadata(self) -> dict:
+        return self._server_metadata
+
+    def infer(self, obs: dict) -> dict:
+        from openpi_client import msgpack_numpy
+
+        self._ws.send(self._packer.pack(obs))
+        response = self._ws.recv()
+        if isinstance(response, str):
+            raise RuntimeError(f"Error in inference server:\n{response}")
+        return msgpack_numpy.unpackb(response)
+
+
 class Pi05RemoteAdapter:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000,
                  execute_steps: int = 4,
@@ -24,10 +53,7 @@ class Pi05RemoteAdapter:
         self.execute_steps = execute_steps
         self.cameras = tuple(cameras)
         if client is None:
-            from openpi_client import websocket_client_policy
-
-            client = websocket_client_policy.WebsocketClientPolicy(
-                host=host, port=port)
+            client = RelaxedWebsocketClient(host=host, port=port)
         self._client = client
         self._queue = ActionChunkQueue(execute_steps)
         self._prompt = ""
@@ -43,17 +69,15 @@ class Pi05RemoteAdapter:
     def act(self, obs: Mapping[str, np.ndarray]) -> np.ndarray:
         if self._queue.remaining == 0:
             request = {
-                "observation/head_image": np.moveaxis(
-                    obs["rgb_head"], 0, -1),
-                "observation/left_wrist_image": np.moveaxis(
-                    obs["rgb_left_wrist"], 0, -1),
-                "observation/right_wrist_image": np.moveaxis(
-                    obs["rgb_right_wrist"], 0, -1),
+                f"observation/{cam}_image": np.moveaxis(obs[f"rgb_{cam}"], 0, -1)
+                for cam in self.cameras
+            }
+            request.update({
                 "observation/state": np.asarray(
                     obs["proprioception"][:18], dtype=np.float32),
                 "prompt": self._prompt,
                 "noise_seed": (self._noise_base + self._calls) % (2 ** 62),
-            }
+            })
             self._calls += 1
             result = self._client.infer(request)
             chunk = np.asarray(result["actions"], dtype=np.float32)

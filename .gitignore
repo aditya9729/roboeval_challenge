@@ -8,3 +8,6 @@ submission/checkpoint/*
 submission/MANIFEST.sha256
 *.tar.gz
 runs/
+submission/policy/roboeval_entry/
+submission/policy/action_spec.json
+submission/checkpoint/pi05_server.json
