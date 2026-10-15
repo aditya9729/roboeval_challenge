@@ -24,8 +24,10 @@ def main() -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    from roboeval_entry.training.openpi_bridge import install
+    from roboeval_entry.training.openpi_bridge import (
+        install, maybe_install_corr_noise)
     install()
+    corr_noise = maybe_install_corr_noise(args.config)
     import openpi.policies.policy_config as policy_config
     import openpi.training.config as _config
     import openpi.training.data_loader as dl
@@ -37,7 +39,8 @@ def main() -> int:
                                       config.model)
     policy = policy_config.create_trained_policy(config, args.checkpoint_dir)
     seeded = SeededPolicy(policy, action_horizon=config.model.action_horizon,
-                          action_dim=config.model.action_dim)
+                          action_dim=config.model.action_dim,
+                          corr_noise=corr_noise)
 
     idxs = np.linspace(0, len(dataset) - 1, args.n, dtype=int)
     samples = [dataset[int(i)] for i in idxs]

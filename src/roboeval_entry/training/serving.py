@@ -16,18 +16,22 @@ class SeededPolicy:
     propagation). Without either key it falls through to the wrapped policy."""
 
     def __init__(self, policy, action_horizon: int = 16, action_dim: int = 32,
-                 inpaint_time_threshold: float = 0.3):
+                 inpaint_time_threshold: float = 0.3, corr_noise=None):
         self._policy = policy
         self.action_horizon = action_horizon
         self.action_dim = action_dim
         self.inpaint_time_threshold = inpaint_time_threshold
+        self.corr_noise = corr_noise
 
     def _noise(self, seed: int) -> np.ndarray:
         import torch
 
         g = torch.Generator().manual_seed(seed)
-        n = torch.randn((self.action_horizon, self.action_dim), generator=g)
-        return n.numpy().astype(np.float32)
+        n = torch.randn((1, self.action_horizon, self.action_dim),
+                        generator=g)
+        if self.corr_noise is not None:
+            n = self.corr_noise.transform(n)
+        return n.numpy().astype(np.float32)[0]
 
     def _find_normalize(self):
         def walk(node):

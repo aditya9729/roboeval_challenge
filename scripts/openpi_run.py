@@ -23,6 +23,11 @@ def _install():
     install()
 
 
+def maybe_install_corr_noise(config_name: str):
+    from roboeval_entry.training.openpi_bridge import maybe_install_corr_noise
+    return maybe_install_corr_noise(config_name)
+
+
 def cmd_inspect(config_name: str) -> int:
     import numpy as np
     import openpi.training.data_loader as dl
@@ -101,10 +106,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.cmd == "inspect":
+        maybe_install_corr_noise(args.config)
         return cmd_inspect(args.config)
     if args.cmd == "norm-stats":
+        maybe_install_corr_noise(args.config)
         return cmd_norm_stats(args.config, args.rest)
     if args.cmd == "train":
+        maybe_install_corr_noise(args.config)
         return cmd_train(args.config, args.rest)
     return 2
 

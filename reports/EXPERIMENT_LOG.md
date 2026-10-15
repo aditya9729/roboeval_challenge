@@ -109,3 +109,12 @@ Conventions: `E<NNN>` = experiment/evaluation run; `T<NNN>` = training run. Arti
 - Command: `scripts/inpaint_check.py --config pi05_roboeval_overfit --checkpoint-dir .../gate03/1000 --n 10 --out /workspace/roboeval/runs/E011_inpaint_check` (openpi env). Chunk A with seed s; prefix = A[4:8]; chunk B with seed s+1, same observation, with/without prefix.
 - Result: same seed + same prefix → identical output. Time-aligned |B[0:4] − prefix|: **inpaint 0.0066 vs plain 0.0150** (2.3× closer); free tail |B[4:12] − A[8:16]|: 0.0189 vs 0.0192 (unchanged). (First-pass report compared row-aligned B vs A, which is the wrong alignment; corrected.)
 - Verdict: mechanism correct and deterministic. Effect on dev-set score is an open question → part of the inference sweep once the 8k/12k checkpoints land.
+
+## E010 — dev-seed learning curve of T002/pr8_v1 (official evaluator, 8 families × 10 dev seeds per checkpoint; automated by `scripts/watch_eval_checkpoints.sh`)
+- Summary table: `/workspace/roboeval/runs/E010_dev_pr8v1_summary.tsv`; per-checkpoint bundles `E010_dev_pr8v1_<step>/`.
+- step 4000 (exit 0, 36 min): score **0.0335** (outcome 0.039, safety 0.847, efficiency 0.542, coordination 0.864), success 1/80 (StackTwoBlocks 1/10); tp: RotateValve 0.20, PackBox 0.16, StackTwoBlocks 0.13, LiftTray 0.12, CubeHandover 0.10, PickSingleBook 0.05, LiftPot 0.03, StackSingleBookShelf 0.03. (step 2000 = E009: 0.015, 0 successes.)
+- Further rows appended automatically at 8k/12k/16k/20k.
+
+## Prep for T003 — correlated flow-matching noise (Larchenko et al. §5), β = 0.5
+- Date: 2026-10-15. `scripts/compute_action_corr.py --config pi05_roboeval_pr8 --beta 0.5` over 50 000 train chunks (normalized with the pr8 quantile stats, padded to 16×32=512): corr mean |off-diag| 0.014, lag-1 temporal corr of dim 0 = 0.794; M = 0.5·corr + 0.5·I eigenvalues [0.504, 12.2]. Asset: `/workspace/roboeval/models/openpi_assets/pi05_roboeval_pr8/roboeval/pr8_qpos18_h16/action_corr_beta0.5.npz`.
+- Config `pi05_roboeval_pr8_corr` = pr8 config + class-level patch of `PI0Pytorch.sample_noise` (training) and the same transform on the seeded inference noise (serving). Shares pr8 norm stats (verified identical q01). Launch deferred until T002 completes.

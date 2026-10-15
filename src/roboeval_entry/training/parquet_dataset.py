@@ -72,11 +72,13 @@ class RoboEvalParquetDataset:
         state_mode: Literal["qpos18"] = "qpos18",
         episode_limit: int | None = None,
         image_cache_root: str | Path | None = DEFAULT_IMAGE_CACHE,
+        actions_only: bool = False,
     ):
         if state_mode != "qpos18":
             raise ValueError(f"unsupported state_mode {state_mode!r}")
         self.dataset_root = Path(dataset_root)
         self.cameras = tuple(cameras)
+        self.actions_only = actions_only
         self.action_horizon = action_horizon
         self.split = split
         self.image_cache_root = (Path(image_cache_root)
@@ -229,7 +231,7 @@ class RoboEvalParquetDataset:
             pad = np.repeat(chunk[-1:], horizon - len(chunk), axis=0)
             chunk = np.concatenate([chunk, pad])
             is_pad[len(ep["actions"][t: t + horizon]):] = True
-        out = {
+        out = {} if self.actions_only else {
             f"observation/{cam}_image": self._frame_image(ep, obs_loc, cam)
             for cam in self.cameras
         }

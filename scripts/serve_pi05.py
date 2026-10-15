@@ -15,8 +15,10 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 
-    from roboeval_entry.training.openpi_bridge import install
+    from roboeval_entry.training.openpi_bridge import (
+        install, maybe_install_corr_noise)
     install()
+    corr_noise = maybe_install_corr_noise(args.config)
 
     import openpi.policies.policy_config as policy_config
     import openpi.serving.websocket_policy_server as ws
@@ -26,7 +28,8 @@ def main() -> int:
     config = _config.get_config(args.config)
     policy = policy_config.create_trained_policy(config, args.checkpoint_dir)
     seeded = SeededPolicy(policy, action_horizon=config.model.action_horizon,
-                          action_dim=config.model.action_dim)
+                          action_dim=config.model.action_dim,
+                          corr_noise=corr_noise)
     server = ws.WebsocketPolicyServer(
         policy=seeded, host=args.host, port=args.port,
         metadata={"config": args.config,

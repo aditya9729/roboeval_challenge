@@ -28,6 +28,30 @@ PR8_VARIANTS = (
 
 _REPO_FACTORIES: dict[str, "RoboEvalDataConfig"] = {}
 
+# Correlated-noise assets per config name (Larchenko et al. §5, beta=0.5).
+CORR_NOISE_ASSETS = {
+    "pi05_roboeval_pr8_corr": (ASSETS_BASE + "/pi05_roboeval_pr8/roboeval/"
+                             "pr8_qpos18_h16/action_corr_beta0.5.npz"),
+}
+
+
+def maybe_install_corr_noise(config_name: str) -> "object | None":
+    """Load + patch correlated noise for configs present in CORR_NOISE_ASSETS.
+
+    Returns the CorrelatedNoise or None. Raises FileNotFoundError if the npz
+    is missing — no silent fallback.
+    """
+    path = CORR_NOISE_ASSETS.get(config_name)
+    if path is None:
+        return None
+    if not Path(path).exists():
+        raise FileNotFoundError(f"corr noise asset missing: {path}")
+    from roboeval_entry.training.corr_noise import (CorrelatedNoise,
+                                                    patch_pi0_sample_noise)
+    cn = CorrelatedNoise.load(path)
+    patch_pi0_sample_noise(cn)
+    return cn
+
 
 def _require_openpi():
     import openpi.models.model as _model  # noqa: F401
@@ -188,6 +212,34 @@ def install() -> None:
         model=pi0_config.Pi0Config(pi05=True, action_horizon=16,
                                    discrete_state_input=True),
         data=pr8_factory,
+        pytorch_weight_path=PYTORCH_WEIGHT_PATH,
+        assets_base_dir=ASSETS_BASE,
+        checkpoint_base_dir=CHECKPOINT_BASE,
+        batch_size=16,
+        num_train_steps=20_000,
+        log_interval=50,
+        save_interval=2_000,
+        num_workers=16,
+        seed=0,
+        ema_decay=None,
+        wandb_enabled=False,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=20_000,
+            decay_lr=2.5e-6),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+    )
+    # Correlated-noise twin of pi05_roboeval_pr8: identical training config;
+    # assets_dir points at the pr8 assets so the same norm_stats.json is
+    # reused (asset_id falls back to repo_id "roboeval/pr8_qpos18_h16").
+    corr_factory = dataclasses.replace(
+        pr8_factory,
+        assets=_config.AssetsConfig(
+            assets_dir=f"{ASSETS_BASE}/pi05_roboeval_pr8"))
+    _config._CONFIGS_DICT["pi05_roboeval_pr8_corr"] = _config.TrainConfig(
+        name="pi05_roboeval_pr8_corr",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16,
+                                   discrete_state_input=True),
+        data=corr_factory,
         pytorch_weight_path=PYTORCH_WEIGHT_PATH,
         assets_base_dir=ASSETS_BASE,
         checkpoint_base_dir=CHECKPOINT_BASE,
