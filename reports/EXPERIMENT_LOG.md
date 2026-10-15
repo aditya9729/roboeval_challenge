@@ -75,4 +75,15 @@ Conventions: `E<NNN>` = experiment/evaluation run; `T<NNN>` = training run. Arti
 - Date: 2026-10-15. Purpose: re-run the gate with `discrete_state_input=True`; expect ≥ gate02 fit at ≤ half the budget.
 - Command: `scripts/openpi_run.py train pi05_roboeval_overfit --exp_name gate03 --overwrite --num_train_steps 1000 --lr_schedule.decay_steps 1000 --save_interval 500 --log_interval 20` (openpi env, nohup, PID 150076).
 - Compute budget: 1× A100-80GB, ≤1 h wall. Output: `runs/T001c_overfit_liftpot4_state/train_stdout.txt`; checkpoints `.../gate03/{500,999,1000}`.
-- Result: PENDING.
+- Result: 1000/1000 steps, exit 0, 63 min wall (3.3–3.8 s/step, GPU ~95% util, 42 GB); loss 0.37 (step 1) → 0.056 (481) → 0.032 (1000).
+
+## E008 — open-loop check of T001c/gate03 at steps 500 and 1000
+- Date: 2026-10-15. Command: `scripts/openloop_check.py --config pi05_roboeval_overfit --checkpoint-dir .../gate03/{500,1000} --n 40 --out /workspace/roboeval/runs/E008_openloop_gate03_{500,1000}` (criterion unchanged from E005).
+- Result: step 500 → ratio 0.640 (vs 1.066 for gate02/500 without state), gripper 0.988; step 1000 → **ratio 0.399 (PASS)**, gripper 0.998.
+- Verdict: adapter gate PASSED with the corrected pi0.5 state path; fixing the state input roughly halves the steps needed to reach the gate. M1 full-data training is unblocked. Still not a generalization claim.
+
+## E007 — closed-loop plumbing: gate02/2000 served over WebSocket into the official sim (LiftPot, dev seeds)
+- Date: 2026-10-15. Purpose: first live run of `scripts/serve_pi05.py` + `Pi05RemoteAdapter` + `scripts/rollout_local.py` (diagnostic harness, NOT the official evaluator). Not a performance claim: 4-episode model, no proprioception (see E006 defect).
+- Commands: `serve_pi05.py --config pi05_roboeval_overfit --checkpoint-dir .../gate02/2000 --port 8000` (openpi env); `MUJOCO_GL=egl PYTHONPATH=src rollout_local.py --family LiftPot --seeds 200000 200001 200002 --policy pi05_remote --execute-steps 4 --out /workspace/roboeval/runs/E007_rollout_gate02_liftpot_dev` (sim env); hold-policy control run in `runs/E007_rollout_hold_liftpot`.
+- Result: 3/3 episodes ran to budget (200 steps) with 0 errors; success 0/3, tp 0.25 on seed 200001; infer 17 ms/step (173 ms first episode incl. warm-up); executed actions have per-dim |mean| 0.003–0.045 (≈ dataset std), grippers toggled 49–60% of steps; several IK non-convergence warnings from the env (reverts to previous joints). Hold control: tp 0, infer 0.05 ms.
+- Verdict: serving/adapter/guard/sim path verified end to end. Performance evaluation deferred to the all-task model.
