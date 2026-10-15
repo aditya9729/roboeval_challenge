@@ -50,6 +50,8 @@ def maybe_install_corr_noise(config_name: str) -> "object | None":
                                                     patch_pi0_sample_noise)
     cn = CorrelatedNoise.load(path)
     patch_pi0_sample_noise(cn)
+    print(f"[corr_noise] patched sample_noise: beta={cn.beta}, "
+          f"corr={cn.corr.shape}, asset={path}", flush=True)
     return cn
 
 

@@ -3,6 +3,7 @@
 # appears. Usage: watch_eval_checkpoints.sh RUN_DIR OUT_PREFIX STEPS...
 set -uo pipefail
 RUN_DIR="$1"; OUT_PREFIX="$2"; shift 2
+EVAL_CONFIG="${EVAL_CONFIG:-pi05_roboeval_pr8}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUMMARY="${OUT_PREFIX}_summary.tsv"
 FAMS="LiftPot LiftTray StackTwoBlocks StackSingleBookShelf CubeHandover PackBox PickSingleBookFromTable RotateValve"
@@ -23,7 +24,7 @@ for STEP in "$@"; do
   done
   echo "[watch] $CKPT stable; evaluating"
   T0=$(date +%s)
-  bash "$ROOT/scripts/eval_dev_pi05.sh" pi05_roboeval_pr8 "$RUN_DIR/$STEP" \
+  bash "$ROOT/scripts/eval_dev_pi05.sh" "$EVAL_CONFIG" "$RUN_DIR/$STEP" \
     "$ROOT/configs/dev_eval_seeds.json" "${OUT_PREFIX}_${STEP}"
   RC=$?
   WALL=$(( $(date +%s) - T0 ))
