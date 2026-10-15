@@ -1,10 +1,9 @@
-team_name: "Your Team"
-method_name: "YourMethod-v2"        # as it should appear on the leaderboard
-contact_email: "you@example.edu"
-affiliation: "Your Institution"
+team_name: "Nirvana AI"
+method_name: "YourMethod-v2"        # as it should appear on the leaderboard  # TODO(owner): method name pending
+contact_email: "you@example.edu"    # TODO(owner): contact email for Aditya Gudal pending
+affiliation: "Your Institution"     # TODO(owner): pending
 members:
-  - "First Author"
-  - "Second Author"
+  - "Aditya Gudal"
 roboeval_release: "corl2026-challenge"
 
 # The evaluator builds every environment from this block, so it must match what
