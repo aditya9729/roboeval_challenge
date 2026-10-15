@@ -46,3 +46,33 @@ Conventions: `E<NNN>` = experiment/evaluation run; `T<NNN>` = training run. Arti
 - Compute: 1× A100-80GB; peak 34.5 GB allocated / 35.2 GB reserved; ~3.4 s/step (data-loader bound: 42 ms/sample PNG-from-parquet); 27.5 min wall.
 - Output: `runs/T001_overfit_liftpot4/{train_stdout.txt,loss_curve.json,gpu_mem.log}`; checkpoints `/workspace/roboeval/models/checkpoints/pi05_roboeval_overfit/gate01/{200,399,400}` (~20 GB each incl. optimizer).
 - Result: loss first-20 mean 0.191 → last-20 mean 0.065 (min 0.038). Verdict: adapter trains; gate passed pending open-loop (E005) and closed-loop (E006) checks.
+
+## E005 — open-loop memorization check of T001/gate01 (step 400), 40 training samples
+- Date: 2026-10-15. Purpose: stronger overfit gate than loss: does the model reproduce its own training action chunks?
+- Command: `scripts/openloop_check.py --config pi05_roboeval_overfit --checkpoint-dir /workspace/roboeval/models/checkpoints/pi05_roboeval_overfit/gate01/400 --n 40 --out /workspace/roboeval/runs/E005_openloop_overfit` (openpi env, in-process).
+- Inputs: gate01/400 checkpoint; same 4 LiftPot train episodes; metric = MSE of first predicted action (raw 14-D) vs dataset action, compared with predict-the-training-mean baseline. Pass criterion (pre-registered): continuous dims 0–11 ratio < 0.5 and gripper agreement > 0.95.
+- Output: `runs/E005_openloop_overfit/report.{json,md}`.
+- Result: cont MSE pred 4.74e-4 vs mean-baseline 4.23e-4 → ratio **1.12 (FAIL)**; gripper agreement 0.981 (pass); seeded noise deterministic (same seed identical, different seed differs); 62 ms/inference.
+- Verdict: NEGATIVE. Grippers learned, arm deltas ≈ mean. Hypotheses (unranked): undertraining at 400 steps; qpos-only state insufficient; normalization. Checked: quantile norm stats for actions are well-conditioned (q01/q99 ≈ ±0.02–0.11 for arm dims, 0/1 grippers) → normalization not the cause. Next: T001b (longer budget).
+
+## T001b — overfit gate rerun, 2000 steps (gate02)
+- Date: 2026-10-15. Purpose: test the undertraining hypothesis from E005 with the same data/adapter, 5× step budget.
+- Command: `scripts/openpi_run.py train pi05_roboeval_overfit --exp_name gate02 --overwrite --num_train_steps 2000 --lr_schedule.decay_steps 2000 --save_interval 500 --log_interval 20` (openpi env, nohup, PID 118042).
+- Inputs/config: identical to T001 except steps 400→2000 (lr constant 5e-5 after 20 warmup).
+- Compute budget: 1× A100-80GB, ≤2 h wall (observed 3.3 s/step, data-loader bound).
+- Output: `runs/T001b_overfit_liftpot4_2k/train_stdout.txt`; checkpoints `.../pi05_roboeval_overfit/gate02/{500,1000,1500,1999,2000}`.
+- Result: 2000/2000 steps, exit 0, 1 h 51 min wall (3.34 s/step); loss 0.13 (step 28) → 0.048 (658) → 0.022 (2000). Checkpoints 500/1000/1500/1999/2000 present.
+- Verdict: see E006.
+
+## E006 — open-loop check of T001b/gate02 at steps 500 and 2000
+- Date: 2026-10-15. Command: `scripts/openloop_check.py --config pi05_roboeval_overfit --checkpoint-dir .../gate02/{500,2000} --n 40 --out /workspace/roboeval/runs/E006_openloop_gate02_{500,2000}` (same criterion as E005).
+- Result: step 500 → cont ratio 1.066 (FAIL), gripper 0.987; step 2000 → cont MSE 1.54e-4 vs baseline 4.23e-4, **ratio 0.365 (PASS)**, gripper 0.998, deterministic seeding OK.
+- Data check (same run): arm deltas are smooth (lag-1 autocorr 0.62–0.78; 3-step moving average explains 89% of variance; ~600 distinct values/dim, no quantization) → the <0.5 criterion is attainable and is kept unchanged.
+- Verdict: E005 failure attributed to undertraining (400 steps ≈ 11 epochs of 595 samples). Gate passed at 2000 steps.
+- **Adapter defect found during review (source fact, openpi `215abfb`, `pi0_pytorch.py` L244/L276):** with `pi05=True` the action expert never receives the continuous state; pi0.5 ingests proprioception only as 256-bin discrete tokens in the prompt (`TokenizePrompt(discrete_state_input=True)`). Our configs set `discrete_state_input=False`, so gate01/gate02 trained **without any proprioception** (images + task text only). Fixed in `openpi_bridge.py` (both configs → `True`, pi0.5 default); verified the prompt now reads `..., State: <18 ints>;\nAction:`. gate01/gate02 checkpoints are retained as negative-control artifacts only.
+
+## T001c — overfit gate with proprioception fixed (gate03)
+- Date: 2026-10-15. Purpose: re-run the gate with `discrete_state_input=True`; expect ≥ gate02 fit at ≤ half the budget.
+- Command: `scripts/openpi_run.py train pi05_roboeval_overfit --exp_name gate03 --overwrite --num_train_steps 1000 --lr_schedule.decay_steps 1000 --save_interval 500 --log_interval 20` (openpi env, nohup, PID 150076).
+- Compute budget: 1× A100-80GB, ≤1 h wall. Output: `runs/T001c_overfit_liftpot4_state/train_stdout.txt`; checkpoints `.../gate03/{500,999,1000}`.
+- Result: PENDING.

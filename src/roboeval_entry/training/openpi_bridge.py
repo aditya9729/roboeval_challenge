@@ -13,7 +13,8 @@ from typing import Sequence
 import numpy as np
 
 DATASET_ROOT = Path("/workspace/roboeval/data/roboeval_ee_delta_20hz_scaled")
-REGISTRY_PATH = Path("/root/roboeval-entry/data_manifests/demo_registry.json")
+REGISTRY_PATH = (Path(__file__).resolve().parents[3]
+                 / "data_manifests" / "demo_registry.json")
 ASSETS_BASE = "/workspace/roboeval/models/openpi_assets"
 CHECKPOINT_BASE = "/workspace/roboeval/models/checkpoints"
 PYTORCH_WEIGHT_PATH = "/workspace/roboeval/models/pi05_base_pytorch"
@@ -162,7 +163,7 @@ def install() -> None:
     _data_loader.create_torch_dataset = patched
 
     model = pi0_config.Pi0Config(pi05=True, action_horizon=16,
-                                 discrete_state_input=False)
+                                 discrete_state_input=True)
     _config._CONFIGS_DICT["pi05_roboeval_overfit"] = _config.TrainConfig(
         name="pi05_roboeval_overfit",
         model=model,
@@ -185,7 +186,7 @@ def install() -> None:
     _config._CONFIGS_DICT["pi05_roboeval_pr8"] = _config.TrainConfig(
         name="pi05_roboeval_pr8",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=16,
-                                   discrete_state_input=False),
+                                   discrete_state_input=True),
         data=pr8_factory,
         pytorch_weight_path=PYTORCH_WEIGHT_PATH,
         assets_base_dir=ASSETS_BASE,

@@ -19,6 +19,7 @@ from typing import Literal, Sequence
 import numpy as np
 
 INDEX_COLS = ["episode_index", "frame_index", "uuid", "task_index", "state", "actions"]
+DEFAULT_IMAGE_CACHE = Path("/workspace/roboeval/data/image_cache")
 
 
 class _FileCache:
@@ -70,6 +71,7 @@ class RoboEvalParquetDataset:
         cameras: Sequence[str] = ("head", "left_wrist", "right_wrist"),
         state_mode: Literal["qpos18"] = "qpos18",
         episode_limit: int | None = None,
+        image_cache_root: str | Path | None = DEFAULT_IMAGE_CACHE,
     ):
         if state_mode != "qpos18":
             raise ValueError(f"unsupported state_mode {state_mode!r}")
@@ -77,6 +79,8 @@ class RoboEvalParquetDataset:
         self.cameras = tuple(cameras)
         self.action_horizon = action_horizon
         self.split = split
+        self.image_cache_root = (Path(image_cache_root)
+                                 if image_cache_root is not None else None)
 
         registry = json.loads(Path(registry_path).read_text())
         uuid_split = {e["episode_id"]: e["split"] for e in registry["episodes"]}
@@ -136,17 +140,33 @@ class RoboEvalParquetDataset:
         fr_idx = np.asarray(rows["frame_index"], dtype=np.int64)
         order = np.lexsort((fr_idx, ep_idx))
 
+        # Optional decoded-image memmap cache; verified against the full
+        # (pre-split) row order of this variant.
+        cache_dir = None
+        if self.image_cache_root is not None:
+            cand = self.image_cache_root / vdir.name
+            if (cand / "index.json").exists():
+                idx = json.loads((cand / "index.json").read_text())
+                sorted_keys = [[int(ep_idx[r]), int(fr_idx[r])] for r in order]
+                sorted_uuids = [str(rows["uuid"][r]) for r in order]
+                if idx["order"] != sorted_keys or idx["uuids"] != sorted_uuids:
+                    raise ValueError(
+                        f"image cache {cand} does not match dataset index "
+                        f"(order/uuid mismatch)")
+                cache_dir = cand
+
         episodes: dict[int, dict] = {}
-        for r in order:
+        for rank, r in enumerate(order):
             uuid = str(rows["uuid"][r])
             ep = int(ep_idx[r])
             if uuid not in uuid_split:
                 raise KeyError(f"episode uuid {uuid} not in registry")
             if uuid_split[uuid] != self.split:
                 continue
+            loc = ("c", rank) if cache_dir is not None else ("f", *locators[r])
             e = episodes.setdefault(ep, {"variant": vdir.name, "episode_index": ep,
                                          "uuid": uuid, "rows": []})
-            e["rows"].append((r, locators[r]))
+            e["rows"].append((r, loc))
         out = []
         for ep in sorted(episodes):
             e = episodes[ep]
@@ -155,6 +175,9 @@ class RoboEvalParquetDataset:
                                    for r, _ in e["rows"]])
             e["actions"] = np.stack([np.asarray(rows["actions"][r], np.float32)
                                      for r, _ in e["rows"]])
+            if cache_dir is not None:
+                e["cache_dir"] = cache_dir
+                e["cache_n"] = idx["n_frames"]
             e["locators"] = [loc for _, loc in e["rows"]]
             e["prompt"] = tasks[int(rows["task_index"][e["rows"][0][0]])]  # noqa: E501
             e["length"] = len(e["rows"])
@@ -165,25 +188,39 @@ class RoboEvalParquetDataset:
         base = len(self._files)
         self._files.extend(f for f, _ in file_rows)
         for e in out:
-            e["locators"] = [(fi + base, row) for fi, row in e["locators"]]
+            e["locators"] = [
+                loc if loc[0] == "c" else ("f", loc[1] + base, loc[2])
+                for loc in e["locators"]
+            ]
         return out
 
     def __len__(self) -> int:
         return len(self._index)
 
-    def _frame_image(self, fi: int, row: int, cam: str) -> np.ndarray:
+    def _frame_image(self, ep: dict, loc: tuple, cam: str) -> np.ndarray:
+        if loc[0] == "c":
+            mms = getattr(self, "_memmaps", None)
+            if mms is None:
+                mms = self._memmaps = {}
+            key = (ep["variant"], cam)
+            mm = mms.get(key)
+            if mm is None:
+                mm = mms[key] = np.memmap(
+                    ep["cache_dir"] / f"{cam}.u8", dtype=np.uint8, mode="r",
+                    shape=(ep["cache_n"], 256, 256, 3))
+            return np.asarray(mm[loc[1]])
         cache = getattr(self, "_file_cache", None)
         if cache is None:
             cache = self._file_cache = _FileCache()
-        table = cache.frames(self._files[fi], [f"cam_{cam}"])
-        entry = table[f"cam_{cam}"][row]
+        table = cache.frames(self._files[loc[1]], [f"cam_{cam}"])
+        entry = table[f"cam_{cam}"][loc[2]]
         blob = entry["bytes"] if isinstance(entry, dict) else entry
         return _png_decode(blob)
 
     def __getitem__(self, index: int) -> dict:
         ei, t = self._index[int(index)]
         ep = self._episodes[ei]
-        obs_fi, obs_row = ep["locators"][t - 1]
+        obs_loc = ep["locators"][t - 1]
         state = ep["state"][t - 1][:18].astype(np.float32)
         horizon = self.action_horizon
         chunk = ep["actions"][t: t + horizon]
@@ -193,7 +230,7 @@ class RoboEvalParquetDataset:
             chunk = np.concatenate([chunk, pad])
             is_pad[len(ep["actions"][t: t + horizon]):] = True
         out = {
-            f"observation/{cam}_image": self._frame_image(obs_fi, obs_row, cam)
+            f"observation/{cam}_image": self._frame_image(ep, obs_loc, cam)
             for cam in self.cameras
         }
         return {
