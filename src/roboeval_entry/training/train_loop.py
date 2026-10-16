@@ -242,7 +242,8 @@ class Validator:
                 obs = _model.Observation.from_dict(inputs)
                 acts = model.sample_actions(device, obs,
                                             noise=self._ol_noise[i].to(device))
-                out = self._out_t({"state": inputs["state"],
+                out = self._out_t({"state": np.asarray(
+                                       inputs["state"][0].detach().cpu()),
                                    "actions": np.asarray(
                                        acts[0].detach().cpu().numpy())})
                 preds.append(np.asarray(out["actions"]))

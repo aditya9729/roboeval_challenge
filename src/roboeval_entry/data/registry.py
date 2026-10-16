@@ -17,7 +17,15 @@ from roboeval_entry.data.splits import assign_demo_split
 
 DATASET_NAME = "roboeval_ee_delta_20hz_scaled"
 VARIANT_SUFFIX = "PositionAndOrientation"
+VARIANT_SUFFIXES = ("PositionAndOrientation", "Position", "Orientation")
 PERCENTILES = (0.1, 1.0, 99.0, 99.9)
+
+
+def family_of(variant: str) -> str:
+    for s in VARIANT_SUFFIXES:
+        if variant.endswith(s):
+            return variant[: -len(s)]
+    return variant
 
 
 @dataclass
@@ -34,12 +42,14 @@ class EpisodeRecord:
     reset_seed: Optional[int]
 
 
-def available_variants(dataset_root: str | Path) -> list[Path]:
+def available_variants(dataset_root: str | Path,
+                       all_variants: bool = False) -> list[Path]:
     root = Path(dataset_root)
     if not root.exists():
         return []
     return sorted(p for p in root.iterdir()
-                  if p.is_dir() and p.name.endswith(VARIANT_SUFFIX)
+                  if p.is_dir() and (all_variants
+                                     or p.name.endswith(VARIANT_SUFFIX))
                   and list((p / "data").rglob("*.parquet")))
 
 
@@ -83,15 +93,22 @@ def _demo_seeds(demo_cache_root: Path, family_variant: str) -> dict[str, int]:
 
 def build_demo_registry(dataset_root: str | Path, demo_cache_root: str | Path,
                         out_path: str | Path,
-                        codebase_version: str = "unknown") -> dict:
-    """Scan every available *PositionAndOrientation variant and write the registry."""
+                        codebase_version: str = "unknown",
+                        all_variants: bool = False) -> dict:
+    """Scan variant dirs and write the registry.
+
+    With all_variants=False (default) only *PositionAndOrientation dirs are
+    scanned (original behaviour). With True, every variant dir with parquet
+    data is included; family is the variant minus its condition suffix.
+    """
     dataset_root, demo_cache_root = Path(dataset_root), Path(demo_cache_root)
     revision = dataset_revision(dataset_root)
     records: list[EpisodeRecord] = []
     families_done: list[str] = []
-    for vdir in available_variants(dataset_root):
+    variant_counts: dict[str, int] = {}
+    for vdir in available_variants(dataset_root, all_variants):
         variant = vdir.name
-        family = variant[: -len(VARIANT_SUFFIX)]
+        family = family_of(variant)
         seeds = _demo_seeds(demo_cache_root, variant)
         rows = _episode_columns(vdir)
         ep_idx = rows["episode_index"].astype(int)
@@ -111,10 +128,12 @@ def build_demo_registry(dataset_root: str | Path, demo_cache_root: str | Path,
                 reset_seed=seeds.get(uuid),
             ))
         families_done.append(variant)
+        variant_counts[variant] = int(len(set(ep_idx.tolist())))
     payload = {
         "dataset": DATASET_NAME,
         "source_revision": revision,
         "variants": families_done,
+        "variant_counts": variant_counts,
         "episodes": [asdict(r) for r in records],
     }
     out = write_json_atomic(out_path, payload)
