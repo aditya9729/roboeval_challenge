@@ -11,6 +11,7 @@ dependencies = ["numpy", "pyyaml"]
 
 [project.optional-dependencies]
 data = ["pyarrow", "pillow"]
+hpo = ["optuna==4.5.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

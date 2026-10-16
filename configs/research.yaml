@@ -65,3 +65,13 @@ selection:
   pilot_tasks: [LiftPot, CubeHandover]
   required_final_tasks: all_eight
   use_official_seeds_for_selection: false
+validation:
+  # Validation tiers (settled):
+  fit: registry split 'train' demos — gradient updates.
+  val: 76 registry 'dev' demos — open-loop HPO objective and plateau/early-stop
+    signal; no simulator.
+  dev_seeds: configs/dev_eval_seeds.json pool 200000-200099 —
+    official-evaluator checkpoint selection (E010 style).
+  holdout_seeds: configs/holdout_seeds.json 300000-300099 — local test; read
+    once per major decision, never for selection.
+  official_seeds: 1000-1049 — never used.
