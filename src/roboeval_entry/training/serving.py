@@ -22,6 +22,27 @@ class SeededPolicy:
         self.action_dim = action_dim
         self.inpaint_time_threshold = inpaint_time_threshold
         self.corr_noise = corr_noise
+        self._expected_state_dim = None
+
+    def _check_state_dim(self, obs: dict) -> None:
+        """Reject states whose length doesn't match the trained norm stats."""
+        if "observation/state" not in obs:
+            return
+        if self._expected_state_dim is None:
+            norm = self._find_normalize()
+            if norm is None:
+                return
+            stats = norm.norm_stats.get("state")
+            if stats is None:
+                return
+            arr = (stats.q01 if norm.use_quantiles and stats.q01 is not None
+                   else stats.mean)
+            self._expected_state_dim = int(np.asarray(arr).shape[-1])
+        got = np.asarray(obs["observation/state"]).shape[-1]
+        if got != self._expected_state_dim:
+            raise ValueError(
+                f"observation/state has {got} dims, model expects "
+                f"{self._expected_state_dim} (check state_mode)")
 
     def _noise(self, seed: int) -> np.ndarray:
         import torch
@@ -58,6 +79,7 @@ class SeededPolicy:
 
     def infer(self, obs: dict, **kwargs: Any) -> dict:
         obs = dict(obs)
+        self._check_state_dim(obs)
         seed = obs.pop("noise_seed", None)
         prefix = obs.pop("prefix_actions", None)
         if seed is not None and "noise" not in kwargs:

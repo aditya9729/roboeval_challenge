@@ -110,6 +110,8 @@ def main() -> int:
         return cmd_inspect(args.config)
     if args.cmd == "norm-stats":
         maybe_install_corr_noise(args.config)
+        import roboeval_entry.training.openpi_bridge as _bridge
+        _bridge.STATS_ONLY = True
         return cmd_norm_stats(args.config, args.rest)
     if args.cmd == "train":
         maybe_install_corr_noise(args.config)

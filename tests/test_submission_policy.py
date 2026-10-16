@@ -134,6 +134,34 @@ class SubmissionPolicyTests(unittest.TestCase):
         policy.act(_obs())
         self.assertEqual(len(client.requests), 2)  # queue cleared -> new infer
 
+    def test_state_mode_from_server_info(self):
+        info = json.loads((self.ckpt / "pi05_server.json").read_text())
+        info["state_mode"] = "qpos18_qvel18"
+        (self.ckpt / "pi05_server.json").write_text(json.dumps(info))
+        client = _FakeClient(self.sha)
+        policy = self.mod.make_policy(self.ckpt, METADATA, client=client)
+        policy.reset(_FakeEpisode())
+        policy.act(_obs())
+        self.assertEqual(
+            client.requests[0]["observation/state"].shape, (36,))
+
+    def test_stage_derives_state_mode(self):
+        spec = importlib.util.spec_from_file_location(
+            "stage_sub", ROOT / "scripts" / "stage_submission.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        for n, want in ((18, "qpos18"), (36, "qpos18_qvel18")):
+            ns = self.ckpt / "assets" / "rid" / "norm_stats.json"
+            ns.parent.mkdir(parents=True, exist_ok=True)
+            ns.write_text(json.dumps({"norm_stats": {
+                "state": {"q01": [0.0] * n, "q99": [1.0] * n},
+                "actions": {"q01": [0.0] * 14, "q99": [1.0] * 14}}}))
+            self.assertEqual(mod._state_mode_from_ckpt(self.ckpt), want)
+        import shutil
+        shutil.rmtree(self.ckpt / "assets")
+        with self.assertRaises(FileNotFoundError):
+            mod._state_mode_from_ckpt(self.ckpt)
+
 
 if __name__ == "__main__":
     unittest.main()

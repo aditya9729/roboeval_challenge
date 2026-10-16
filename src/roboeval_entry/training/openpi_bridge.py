@@ -26,7 +26,21 @@ PR8_VARIANTS = (
     "PickSingleBookFromTablePositionAndOrientation", "RotateValvePositionAndOrientation",
 )
 
+_FAMILIES = (
+    "LiftPot", "LiftTray", "StackTwoBlocks", "StackSingleBookShelf",
+    "CubeHandover", "PackBox", "PickSingleBookFromTable", "RotateValve")
+_SUFFIXES = ("", "Position", "Orientation", "PositionAndOrientation")
+_NO_ORIENTATION = {"RotateValve", "StackSingleBookShelf"}
+ALL_VARIANTS = tuple(
+    f + s for f in _FAMILIES for s in _SUFFIXES
+    if not (f in _NO_ORIENTATION and s == "Orientation"))
+
 _REPO_FACTORIES: dict[str, "RoboEvalDataConfig"] = {}
+
+# When True (norm-stats runs), datasets serve 1x1 placeholder images — stats
+# only consume state/actions and image decode would dominate runtime for
+# uncached variants.
+STATS_ONLY = False
 
 # Correlated-noise assets per config name (Larchenko et al. §5, beta=0.5).
 CORR_NOISE_ASSETS = {
@@ -120,10 +134,17 @@ def _data_config_factory_cls():
         registry_path: str = str(REGISTRY_PATH)
         variants: tuple[str, ...] = PR8_VARIANTS
         split: str = "train"
+        state_mode: str = "qpos18"
         episode_limit: int | None = None
         action_horizon_override: int | None = None
+        successful_only: bool = False
+        images_placeholder: bool = False
 
         def create(self, assets_dirs, model_config):
+            # NOTE: pi05 never consumes observation.state in the model —
+            # state enters only via discretized prompt tokens — so a 36-dim
+            # state passes pad_to_dim untouched and round-trips Unnormalize
+            # correctly (no truncation anywhere).
             model_transforms = _config.ModelTransformFactory()(model_config)
             return dataclasses.replace(
                 self.create_base_config(assets_dirs, model_config),
@@ -153,7 +174,10 @@ def _create_dataset_for_repo(data_config, action_horizon, model_config):
         split=factory.split,
         registry_path=factory.registry_path,
         action_horizon=action_horizon,
+        state_mode=factory.state_mode,
         episode_limit=factory.episode_limit,
+        successful_only=factory.successful_only,
+        images_placeholder=(factory.images_placeholder or STATS_ONLY),
     )
 
 
@@ -214,6 +238,36 @@ def install() -> None:
         model=pi0_config.Pi0Config(pi05=True, action_horizon=16,
                                    discrete_state_input=True),
         data=pr8_factory,
+        pytorch_weight_path=PYTORCH_WEIGHT_PATH,
+        assets_base_dir=ASSETS_BASE,
+        checkpoint_base_dir=CHECKPOINT_BASE,
+        batch_size=16,
+        num_train_steps=20_000,
+        log_interval=50,
+        save_interval=2_000,
+        num_workers=16,
+        seed=0,
+        ema_decay=None,
+        wandb_enabled=False,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=20_000,
+            decay_lr=2.5e-6),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+    )
+    # All-variant twin: same recipe, all 30 dataset variants, 36-dim
+    # qpos+qvel state (own norm stats under
+    # pi05_roboeval_all/roboeval/all_qpos36_h16). max_token_len raised so the
+    # 36-dim discretized state in the prompt never truncates.
+    all_factory = RDC(repo_id="roboeval/all_qpos36_h16",
+                      variants=ALL_VARIANTS, split="train",
+                      state_mode="qpos18_qvel18")
+    _REPO_FACTORIES["roboeval/all_qpos36_h16"] = all_factory
+    _config._CONFIGS_DICT["pi05_roboeval_all"] = _config.TrainConfig(
+        name="pi05_roboeval_all",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16,
+                                   discrete_state_input=True,
+                                   max_token_len=256),
+        data=all_factory,
         pytorch_weight_path=PYTORCH_WEIGHT_PATH,
         assets_base_dir=ASSETS_BASE,
         checkpoint_base_dir=CHECKPOINT_BASE,

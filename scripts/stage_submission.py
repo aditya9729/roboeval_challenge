@@ -36,6 +36,22 @@ def _copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, ignore=ignore)
 
 
+def _state_mode_from_ckpt(ckpt: Path) -> str:
+    """Read the checkpoint's bundled norm_stats.json -> state_mode string."""
+    candidates = sorted(ckpt.glob("assets/*/norm_stats.json"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"no norm_stats.json under {ckpt}/assets — cannot determine "
+            f"state_mode")
+    stats = json.loads(candidates[0].read_text())["norm_stats"]
+    entry = stats["state"]
+    n = len(entry["q01"] if "q01" in entry else entry["mean"])
+    mode = {18: "qpos18", 36: "qpos18_qvel18"}.get(n)
+    if mode is None:
+        raise ValueError(f"unexpected state dim {n} in {candidates[0]}")
+    return mode
+
+
 def _atomic_write(path: Path, data: str) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
     with os.fdopen(fd, "w") as f:
@@ -73,6 +89,7 @@ def main() -> int:
         "port": args.port,
         "execute_steps": args.execute_steps,
         "inpaint_steps": args.inpaint_steps,
+        "state_mode": _state_mode_from_ckpt(ckpt),
         "model_sha256": _sha256(weights),
         "gripper_rule": (json.loads(args.gripper_rule_params)
                          if args.gripper_rule and args.gripper_rule_params

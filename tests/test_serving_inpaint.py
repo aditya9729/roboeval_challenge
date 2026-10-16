@@ -43,5 +43,43 @@ class NormalizeActionsTests(unittest.TestCase):
         np.testing.assert_array_equal(out[0, 4:], noise[0, 4:])
 
 
+class _NormStats(types.SimpleNamespace):
+    pass
+
+
+class Normalize:  # name matters: _find_normalize matches the class name
+    def __init__(self, state_dim):
+        self.norm_stats = {"state": _NormStats(
+            q01=np.zeros(state_dim), q99=np.ones(state_dim),
+            mean=np.zeros(state_dim), std=np.ones(state_dim))}
+        self.use_quantiles = True
+
+
+class _TGroup:
+    def __init__(self, *ts):
+        self.transforms = ts
+
+
+class _FakePolicy:
+    def __init__(self, state_dim):
+        self._input_transform = _TGroup(_TGroup(), Normalize(state_dim))
+        self.last_obs = None
+
+    def infer(self, obs, **kwargs):
+        self.last_obs = obs
+        return {"actions": np.zeros((16, 14), np.float32)}
+
+
+class StateDimCheckTests(unittest.TestCase):
+    def test_mismatch_raises_and_match_passes(self):
+        from roboeval_entry.training.serving import SeededPolicy
+
+        pol = SeededPolicy(_FakePolicy(36))
+        with self.assertRaises(ValueError):
+            pol.infer({"observation/state": np.zeros(18, np.float32)})
+        out = pol.infer({"observation/state": np.zeros(36, np.float32)})
+        self.assertEqual(out["actions"].shape, (16, 14))
+
+
 if __name__ == "__main__":
     unittest.main()

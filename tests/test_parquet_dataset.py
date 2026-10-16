@@ -108,11 +108,41 @@ class ParquetDatasetTests(unittest.TestCase):
         np.testing.assert_array_equal(s["actions_is_pad"],
                                       np.array([False, False, True]))
 
+    def test_state_mode_qvel(self):
+        ds = self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
+                     self.registry, action_horizon=4,
+                     state_mode="qpos18_qvel18")
+        s = ds[0]
+        self.assertEqual(s["observation/state"].shape, (36,))
+        np.testing.assert_array_equal(
+            s["observation/state"],
+            np.linspace(0, 0, 36, dtype=np.float32))
+        with self.assertRaises(ValueError):
+            self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
+                    self.registry, action_horizon=4, state_mode="bogus")
+
     def test_episode_limit(self):
         ds = self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
                      self.registry, action_horizon=2, episode_limit=1)
         self.assertEqual(len(ds), 5)
         self.assertEqual(ds._episodes[0]["uuid"], "uu-train-a")
+
+    def test_successful_only(self):
+        sf = self.root / "succ.txt"
+        sf.write_text("# header\nuu-train-a\n")
+        ds = self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
+                     self.registry, action_horizon=2, successful_only=True,
+                     successful_file=sf)
+        self.assertEqual(ds.summary()["num_episodes"], 1)
+        self.assertEqual(ds._episodes[0]["uuid"], "uu-train-a")
+        # default keeps everything
+        ds2 = self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
+                      self.registry, action_horizon=2)
+        self.assertEqual(ds2.summary()["num_episodes"], 2)
+        with self.assertRaises(FileNotFoundError):
+            self.DS(self.root, ["LiftPotPositionAndOrientation"], "train",
+                    self.registry, action_horizon=2, successful_only=True,
+                    successful_file=self.root / "nope.txt")
 
     def test_missing_uuid_raises(self):
         self._write_registry(["uu-train-a"], ["uu-dev"])

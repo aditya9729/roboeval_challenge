@@ -85,6 +85,26 @@ class PlateauAnnealerTests(unittest.TestCase):
             8, 1, 14).repeat(16, 1), targets, mean)
         self.assertAlmostEqual(ratio2, 1.0, places=5)
 
+    def test_displacement_mse_ratio(self):
+        from roboeval_entry.training.train_loop import (
+            displacement_mse_ratio)
+
+        rng = np.random.default_rng(0)
+        targets = rng.normal(size=(8, 16, 14)) * 0.01
+        mean = np.zeros(14)
+        # perfect prediction -> 0
+        self.assertAlmostEqual(
+            displacement_mse_ratio(targets, targets, mean), 0.0, places=6)
+        # predicting the mean chunk -> ~1
+        base = np.broadcast_to(mean, targets.shape).copy()
+        self.assertAlmostEqual(
+            displacement_mse_ratio(base, targets, mean), 1.0, places=5)
+        # integrated error grows with horizon: last-step weighting > first
+        off = targets.copy()
+        off[:, -1, :12] += 0.1
+        r = displacement_mse_ratio(off, targets, mean)
+        self.assertGreater(r, 0.0)
+
 
 class ValRngIsolationTests(unittest.TestCase):
     def setUp(self):

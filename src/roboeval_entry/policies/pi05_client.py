@@ -45,13 +45,20 @@ class RelaxedWebsocketClient:
         return msgpack_numpy.unpackb(response)
 
 
+STATE_DIMS = {"qpos18": 18, "qpos18_qvel18": 36}
+
+
 class Pi05RemoteAdapter:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000,
                  execute_steps: int = 4,
                  cameras: Sequence[str] = ("head", "left_wrist", "right_wrist"),
-                 client=None, gripper_rule=None, inpaint_steps: int = 0):
+                 client=None, gripper_rule=None, inpaint_steps: int = 0,
+                 state_mode: str = "qpos18"):
         if execute_steps + inpaint_steps > 16:
             raise ValueError("execute_steps + inpaint_steps must be <= 16")
+        if state_mode not in STATE_DIMS:
+            raise ValueError(f"unsupported state_mode {state_mode!r}")
+        self.state_dim = STATE_DIMS[state_mode]
         self.execute_steps = execute_steps
         self.inpaint_steps = inpaint_steps
         self.cameras = tuple(cameras)
@@ -82,9 +89,14 @@ class Pi05RemoteAdapter:
                 f"observation/{cam}_image": np.moveaxis(obs[f"rgb_{cam}"], 0, -1)
                 for cam in self.cameras
             }
+            proprio = np.asarray(obs["proprioception"])
+            if proprio.shape[-1] < self.state_dim:
+                raise ValueError(
+                    f"proprioception has {proprio.shape[-1]} dims, "
+                    f"state_mode requires {self.state_dim}")
             request.update({
                 "observation/state": np.asarray(
-                    obs["proprioception"][:18], dtype=np.float32),
+                    proprio[:self.state_dim], dtype=np.float32),
                 "prompt": self._prompt,
                 "noise_seed": (self._noise_base + self._calls) % (2 ** 62),
             })

@@ -69,16 +69,32 @@ class RoboEvalParquetDataset:
         registry_path: str | Path,
         action_horizon: int,
         cameras: Sequence[str] = ("head", "left_wrist", "right_wrist"),
-        state_mode: Literal["qpos18"] = "qpos18",
+        state_mode: Literal["qpos18", "qpos18_qvel18"] = "qpos18",
         episode_limit: int | None = None,
         image_cache_root: str | Path | None = DEFAULT_IMAGE_CACHE,
         actions_only: bool = False,
+        images_placeholder: bool = False,
+        successful_only: bool = False,
+        successful_file: str | Path = (
+            "/workspace/roboeval/vendor/RoboEval/"
+            "successful_demos_ee_delta_20hz.txt"),
     ):
-        if state_mode != "qpos18":
+        state_dims = {"qpos18": 18, "qpos18_qvel18": 36}
+        if state_mode not in state_dims:
             raise ValueError(f"unsupported state_mode {state_mode!r}")
+        self.state_dim = state_dims[state_mode]
         self.dataset_root = Path(dataset_root)
         self.cameras = tuple(cameras)
         self.actions_only = actions_only
+        self.images_placeholder = images_placeholder
+        uuid_filter = None
+        if successful_only:
+            sf = Path(successful_file)
+            if not sf.exists():
+                raise FileNotFoundError(
+                    f"successful-demos file missing: {sf}")
+            uuid_filter = {ln.strip() for ln in sf.read_text().splitlines()
+                           if ln.strip() and not ln.startswith("#")}
         self.action_horizon = action_horizon
         self.split = split
         self.image_cache_root = (Path(image_cache_root)
@@ -96,6 +112,9 @@ class RoboEvalParquetDataset:
                 raise FileNotFoundError(f"variant dir missing: {vdir}")
             tasks = self._load_tasks(vdir)
             episodes = self._index_variant(vdir, uuid_split, tasks)
+            if uuid_filter is not None:
+                episodes = [e for e in episodes
+                            if e["uuid"] in uuid_filter]
             if episode_limit is not None:
                 episodes = episodes[:episode_limit]
             for ep in episodes:
@@ -223,7 +242,7 @@ class RoboEvalParquetDataset:
         ei, t = self._index[int(index)]
         ep = self._episodes[ei]
         obs_loc = ep["locators"][t - 1]
-        state = ep["state"][t - 1][:18].astype(np.float32)
+        state = ep["state"][t - 1][:self.state_dim].astype(np.float32)
         horizon = self.action_horizon
         chunk = ep["actions"][t: t + horizon]
         is_pad = np.zeros(horizon, dtype=bool)
@@ -231,10 +250,17 @@ class RoboEvalParquetDataset:
             pad = np.repeat(chunk[-1:], horizon - len(chunk), axis=0)
             chunk = np.concatenate([chunk, pad])
             is_pad[len(ep["actions"][t: t + horizon]):] = True
-        out = {} if self.actions_only else {
-            f"observation/{cam}_image": self._frame_image(ep, obs_loc, cam)
-            for cam in self.cameras
-        }
+        if self.actions_only:
+            out = {}
+        elif self.images_placeholder:
+            # 1x1 black frames; only valid where images are unused
+            # (e.g. norm-stats runs over state/actions).
+            out = {f"observation/{cam}_image": np.zeros((1, 1, 3), np.uint8)
+                   for cam in self.cameras}
+        else:
+            out = {f"observation/{cam}_image":
+                   self._frame_image(ep, obs_loc, cam)
+                   for cam in self.cameras}
         return {
             **out,
             "observation/state": state,

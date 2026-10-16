@@ -56,6 +56,28 @@ class Pi05RemoteAdapterTests(unittest.TestCase):
             (client.requests[1]["noise_seed"] - client.requests[0]["noise_seed"])
             % (2 ** 62), 1)
 
+    def test_state_mode_qvel18_sends_36(self):
+        client = _FakeClient()
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    state_mode="qpos18_qvel18")
+        adapter.reset(CTX)
+        adapter.act(_obs())
+        st = client.requests[0]["observation/state"]
+        self.assertEqual(st.shape, (36,))
+        np.testing.assert_array_equal(st, np.arange(36, dtype=np.float32))
+
+    def test_state_mode_mismatch_raises(self):
+        client = _FakeClient()
+        adapter = Pi05RemoteAdapter(execute_steps=4, client=client,
+                                    state_mode="qpos18_qvel18")
+        adapter.reset(CTX)
+        obs = _obs()
+        obs["proprioception"] = np.arange(18, dtype=np.float32)
+        with self.assertRaises(ValueError):
+            adapter.act(obs)
+        with self.assertRaises(ValueError):
+            Pi05RemoteAdapter(client=client, state_mode="bogus")
+
     def test_reset_redraws_and_clears(self):
         client = _FakeClient()
         adapter = Pi05RemoteAdapter(execute_steps=4, client=client)

@@ -19,6 +19,9 @@ def main() -> int:
     p.add_argument("--config", required=True)
     p.add_argument("--checkpoint-dir", required=True)
     p.add_argument("--n", type=int, default=40)
+    p.add_argument("--k", type=int, default=4,
+                   help="chunks sampled per sample for the displacement ratio")
+    p.add_argument("--split", choices=["train", "dev"], default="train")
     p.add_argument("--out", required=True)
     args = p.parse_args()
     out = Path(args.out)
@@ -32,11 +35,27 @@ def main() -> int:
     import openpi.training.config as _config
     import openpi.training.data_loader as dl
     from roboeval_entry.training.serving import SeededPolicy
+    from roboeval_entry.training.train_loop import displacement_mse_ratio
 
     config = _config.get_config(args.config)
     data_config = config.data.create(config.assets_dirs, config.model)
-    dataset = dl.create_torch_dataset(data_config, config.model.action_horizon,
-                                      config.model)
+    if args.split == "train":
+        dataset = dl.create_torch_dataset(
+            data_config, config.model.action_horizon, config.model)
+        mean_source = dataset
+    else:
+        # dev eval set; baseline still computed on the TRAIN split.
+        from roboeval_entry.training.parquet_dataset import (
+            RoboEvalParquetDataset)
+        import dataclasses as _dc
+        fac = _dc.replace(config.data, split="dev")
+        dataset = RoboEvalParquetDataset(
+            dataset_root=fac.dataset_root, variants=fac.variants,
+            split="dev", registry_path=fac.registry_path,
+            action_horizon=config.model.action_horizon,
+            state_mode=fac.state_mode)
+        mean_source = dl.create_torch_dataset(
+            data_config, config.model.action_horizon, config.model)
     policy = policy_config.create_trained_policy(config, args.checkpoint_dir)
     seeded = SeededPolicy(policy, action_horizon=config.model.action_horizon,
                           action_dim=config.model.action_dim,
@@ -55,22 +74,27 @@ def main() -> int:
     det_diff = not bool(np.array_equal(a1, a3))
 
     # Mean-baseline: per-dim mean action chunk over the dataset's real actions.
-    all_actions = np.concatenate([ep["actions"] for ep in dataset._episodes])
+    all_actions = np.concatenate(
+        [ep["actions"] for ep in mean_source._episodes])
     mean_action = all_actions.mean(axis=0)
 
-    preds, targets = [], []
+    preds_k, targets = [], []
     lat = []
     for i, s in enumerate(samples):
         request = {k: v for k, v in s.items()
                    if k.startswith("observation/") or k == "prompt"}
-        request["noise_seed"] = i
-        t0 = time.perf_counter()
-        pred = seeded.infer(request)["actions"]
-        lat.append(time.perf_counter() - t0)
-        preds.append(pred)
+        chunks = []
+        for kk in range(args.k):
+            # k=0 keeps the historical per-sample seed i.
+            request["noise_seed"] = i if kk == 0 else i * 1_000_003 + kk
+            t0 = time.perf_counter()
+            chunks.append(seeded.infer(dict(request))["actions"])
+            lat.append(time.perf_counter() - t0)
+        preds_k.append(np.stack(chunks))
         targets.append(s["actions"])
-    preds = np.stack(preds)     # (N,H,14)
+    preds_k = np.stack(preds_k)          # (N,K,H,14)
     targets = np.stack(targets)
+    preds = preds_k[:, 0]                # single-sample (k=0) view
 
     mse_pred = ((preds - targets) ** 2).mean(axis=(0, 1))
     base = np.broadcast_to(mean_action, targets.shape)
@@ -80,10 +104,14 @@ def main() -> int:
     grip_agree = float((grip_pred == grip_true).mean())
 
     cont_ratio = float(mse_pred[CONT_DIMS].mean() / mse_base[CONT_DIMS].mean())
+    disp_k1 = displacement_mse_ratio(preds, targets, mean_action)
+    disp_kk = displacement_mse_ratio(preds_k.mean(axis=1), targets,
+                                     mean_action)
     report = {
         "config": args.config,
         "checkpoint_dir": args.checkpoint_dir,
         "n_samples": args.n,
+        "split": args.split,
         "determinism_same_seed_identical": det_same,
         "determinism_diff_seed_differs": det_diff,
         "per_dim_mse_pred": mse_pred.tolist(),
@@ -91,6 +119,9 @@ def main() -> int:
         "cont_mse_pred": float(mse_pred[CONT_DIMS].mean()),
         "cont_mse_baseline": float(mse_base[CONT_DIMS].mean()),
         "cont_mse_ratio": cont_ratio,
+        "disp_mse_ratio_k1": disp_k1,
+        f"disp_mse_ratio_k{args.k}": disp_kk,
+        "k": args.k,
         "gripper_agreement": grip_agree,
         "infer_ms_mean": float(np.mean(lat) * 1000),
     }
@@ -99,6 +130,7 @@ def main() -> int:
           f"samples: {args.n}, ckpt: {args.checkpoint_dir}",
           f"determinism: same-seed identical={det_same}, diff-seed differs={det_diff}",
           f"cont-dim MSE pred={report['cont_mse_pred']:.5f} vs baseline={report['cont_mse_baseline']:.5f} (ratio {cont_ratio:.3f})",
+          f"disp_mse_ratio_k1={disp_k1:.3f} disp_mse_ratio_k{args.k}={disp_kk:.3f}",
           f"gripper agreement={grip_agree:.3f}", "",
           "| dim | mse_pred | mse_baseline |", "|---|---|---|"]
     md += [f"| {d} | {mse_pred[d]:.5f} | {mse_base[d]:.5f} |" for d in range(14)]

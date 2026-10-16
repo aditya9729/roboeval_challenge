@@ -38,6 +38,7 @@ class ValidationConfig:
     max_anneals: int = 3
     rel_tol: float = 0.01
     seed: int = 0
+    k: int = 4
     enabled: bool = True
 
 
@@ -98,6 +99,24 @@ def openloop_objective(preds: np.ndarray, targets: np.ndarray,
     mse_base = ((base - targets) ** 2).mean(axis=(0, 1))
     grip = ((preds[..., 12:14] > 0.5) == (targets[..., 12:14] > 0.5)).mean()
     return float(mse_pred[cont].mean() / mse_base[cont].mean()), float(grip)
+
+
+def displacement_mse_ratio(mean_preds: np.ndarray, targets: np.ndarray,
+                           mean_chunk: np.ndarray) -> float:
+    """Integrated-displacement MSE ratio on arm dims 0-11.
+
+    ``mean_preds`` is the per-sample average over K sampled chunks
+    (N,H,14). Positions are the cumsum over the horizon of the velocity
+    actions; the baseline is the cumsum of the train-split mean chunk.
+    """
+    d_pred = np.cumsum(mean_preds[..., :12].astype(np.float64), axis=1)
+    d_true = np.cumsum(targets[..., :12].astype(np.float64), axis=1)
+    base_chunk = np.broadcast_to(
+        mean_chunk[:12], (targets.shape[0], targets.shape[1], 12))
+    d_base = np.cumsum(base_chunk.astype(np.float64), axis=1)
+    mse_pred = float(((d_pred - d_true) ** 2).mean())
+    mse_base = float(((d_base - d_true) ** 2).mean())
+    return mse_pred / mse_base
 
 
 def validation_noise(seed: int, n: int, horizon: int, dim: int):
@@ -165,19 +184,26 @@ class Validator:
             0, n - 1, min(cfg.n_openloop, n), dtype=int)
         if min(cfg.n_loss, cfg.n_openloop) > n:
             logging.warning("dev dataset (%d) smaller than val n; clamped", n)
-        # mean action chunk baseline over dev episodes (raw space)
+        # mean action chunk baseline over TRAIN episodes (raw space) — the
+        # same baseline openloop_check uses, so train/dev vals are comparable.
+        train_ds = dl.create_torch_dataset(
+            data_config, config.model.action_horizon, config.model)
         all_actions = np.concatenate(
-            [ep["actions"] for ep in raw_dev._episodes])
+            [ep["actions"] for ep in train_ds._episodes])
         self.mean_chunk = all_actions.mean(axis=0).astype(np.float64)
 
-        # input/output transforms for per-sample open-loop inference
-        self._in_t = _transforms.compose([
+        # input/output transforms for per-sample open-loop inference.
+        # Split at the model-transform boundary: out_t's Unnormalize expects
+        # the normalized-but-untruncated state (norm_stats length), while the
+        # model input gets the post-PadOrTruncate state.
+        self._in_pre = _transforms.compose([
             *dev_dc.repack_transforms.inputs,
             *dev_dc.data_transforms.inputs,
             _transforms.Normalize(dev_dc.norm_stats,
                                   use_quantiles=dev_dc.use_quantile_norm),
-            *dev_dc.model_transforms.inputs,
         ])
+        self._in_model = _transforms.compose(
+            [*dev_dc.model_transforms.inputs])
         self._out_t = _transforms.compose([
             *dev_dc.model_transforms.outputs,
             _transforms.Unnormalize(dev_dc.norm_stats,
@@ -192,8 +218,10 @@ class Validator:
         tb = np.random.default_rng(cfg.seed).beta(
             1.5, 1.0, len(self.loss_idxs)) * 0.999 + 0.001
         self._loss_time = torch.from_numpy(tb.astype(np.float32))
-        self._ol_noise, _ = validation_noise(cfg.seed, len(self.ol_idxs),
-                                             H, D)
+        # K independent noise draws per open-loop sample (seeds seed+k).
+        self._ol_noise = np.stack([
+            validation_noise(cfg.seed + kk, len(self.ol_idxs), H, D)[0]
+            .numpy() for kk in range(cfg.k)])  # (K, N, 1, H, D)
         self._model = model
 
     def run(self, step: int, train_loss_avg: float, lr: float,
@@ -228,31 +256,46 @@ class Validator:
                 losses.append(float(per.mean()))
         val_loss = float(np.mean(losses))
 
-        # (b) deterministic open-loop objective on raw dev samples
-        preds, targets = [], []
+        # (b) deterministic open-loop objectives on raw dev samples:
+        # K sampled chunks per sample; the mean chunk feeds the
+        # integrated-displacement ratio (robust to mode collapse).
+        preds_k, targets = [], []
         with torch.no_grad():
             for i, idx in enumerate(self.ol_idxs):
                 raw = self.raw_dev[int(idx)]
-                ti = self._in_t(dict(raw))
+                pre = self._in_pre(dict(raw))
+                ti = self._in_model(dict(pre))
                 inputs = jax.tree.map(
                     lambda x: torch.from_numpy(np.array(x)).to(device)[None],
                     {k: ti[k] for k in
                      ("state", "image", "image_mask", "tokenized_prompt",
                       "tokenized_prompt_mask") if k in ti})
                 obs = _model.Observation.from_dict(inputs)
-                acts = model.sample_actions(device, obs,
-                                            noise=self._ol_noise[i].to(device))
-                out = self._out_t({"state": np.asarray(
-                                       inputs["state"][0].detach().cpu()),
-                                   "actions": np.asarray(
-                                       acts[0].detach().cpu().numpy())})
-                preds.append(np.asarray(out["actions"]))
+                chunks = []
+                for kk in range(cfg.k):
+                    acts = model.sample_actions(
+                        device, obs,
+                        noise=torch.as_tensor(self._ol_noise[kk, i]).to(device))
+                    out = self._out_t(
+                        {"state": np.asarray(pre["state"]),
+                         "actions": np.asarray(
+                             acts[0].detach().cpu().numpy())})
+                    chunks.append(np.asarray(out["actions"]))
+                preds_k.append(np.stack(chunks))  # (K,H,14)
                 targets.append(np.asarray(raw["actions"]))
-        cont_ratio, grip = openloop_objective(
-            np.stack(preds), np.stack(targets), self.mean_chunk)
+        preds_k = np.stack(preds_k)      # (N,K,H,14)
+        targets = np.stack(targets)
+        single = preds_k[:, 0]
+        mean_pred = preds_k.mean(axis=1)
+        cont_ratio, grip = openloop_objective(single, targets,
+                                              self.mean_chunk)
+        disp_k1 = displacement_mse_ratio(single, targets, self.mean_chunk)
+        disp_kk = displacement_mse_ratio(mean_pred, targets, self.mean_chunk)
         model.train()
         return {"step": step, "val_loss": val_loss,
                 "cont_mse_ratio": cont_ratio, "gripper_agreement": grip,
+                "disp_mse_ratio_k1": disp_k1,
+                f"disp_mse_ratio_k{cfg.k}": disp_kk,
                 "lr_scale": lr_scale, "lr": lr,
                 "train_loss_avg": train_loss_avg,
                 "wall_s": time.time() - t0}
@@ -369,17 +412,19 @@ def train_loop(config, val_cfg: ValidationConfig | None = None) -> None:
                             annealer.lr_scale)
         with open(history_path, "a") as f:
             f.write(json.dumps(res) + "\n")
-        logging.info("val step=%d loss=%.4f cont_mse_ratio=%.3f grip=%.3f "
+        obj_key = f"disp_mse_ratio_k{val_cfg.k}"
+        objective = res[obj_key]
+        logging.info("val step=%d loss=%.4f %s=%.3f cont=%.3f grip=%.3f "
                      "lr_scale=%.3f", global_step, res["val_loss"],
-                     res["cont_mse_ratio"], res["gripper_agreement"],
-                     annealer.lr_scale)
+                     obj_key, objective, res["cont_mse_ratio"],
+                     res["gripper_agreement"], annealer.lr_scale)
         losses_since_val.clear()
-        outcome = annealer.update(res["cont_mse_ratio"])
+        outcome = annealer.update(objective)
         if outcome == "improved":
             save_step_checkpoint(model, optim, ckpt_dir / "best", config,
                                  data_config, global_step)
             (ckpt_dir / "best" / "val.json").write_text(json.dumps(
-                {"step": global_step, "objective": res["cont_mse_ratio"],
+                {"step": global_step, "objective": objective,
                  "val_loss": res["val_loss"]}))
         elif outcome == "anneal":
             logging.info("plateau: anneal #%d, lr_scale -> %.3f",

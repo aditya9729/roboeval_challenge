@@ -44,6 +44,7 @@ def make_policy(checkpoint_dir: Path, metadata: Dict[str, Any], client=None):
     adapter = Pi05RemoteAdapter(
         host=info["host"], port=info["port"],
         execute_steps=info["execute_steps"], cameras=cameras, client=client,
-        gripper_rule=rule, inpaint_steps=info.get("inpaint_steps", 0))
+        gripper_rule=rule, inpaint_steps=info.get("inpaint_steps", 0),
+        state_mode=info.get("state_mode", "qpos18"))
     guard = ActionGuard(load_action_spec(_POLICY_DIR / "action_spec.json"))
     return OfficialPolicyBridge(adapter, ObservationSchema(cameras), guard)

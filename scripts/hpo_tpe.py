@@ -31,8 +31,9 @@ def suggest(trial) -> dict:
     }
 
 
-def trial_cmd(p: dict, trial_dir: Path, exp_name: str) -> list[str]:
-    cmd = [PY, str(ROOT / "scripts/train_roboeval.py"), "pi05_roboeval_pr8",
+def trial_cmd(p: dict, trial_dir: Path, exp_name: str,
+              config: str) -> list[str]:
+    cmd = [PY, str(ROOT / "scripts/train_roboeval.py"), config,
            "--exp_name", exp_name, "--overwrite",
            "--num_train_steps", str(TRIAL_STEPS),
            "--lr_schedule.decay_steps", str(TRIAL_STEPS),
@@ -55,15 +56,15 @@ def cleanup_ckpt_dir(ckpt_dir: Path) -> None:
             shutil.rmtree(d)
 
 
-def run_trial(trial) -> float:
+def run_trial(trial, config: str) -> float:
     import optuna
     exp = f"hpo01_t{trial.number:03d}"
     tdir = HPO_DIR / f"t{trial.number:03d}"
     tdir.mkdir(parents=True, exist_ok=True)
     p = suggest(trial)
-    ckpt_dir = tdir / "ckpts" / "pi05_roboeval_pr8" / exp
+    ckpt_dir = tdir / "ckpts" / config / exp
     hist = ckpt_dir / "val_history.jsonl"
-    cmd = trial_cmd(p, tdir, exp)
+    cmd = trial_cmd(p, tdir, exp, config)
     (tdir / "params.json").write_text(json.dumps(p))
     with open(tdir / "stdout.txt", "w") as out:
         proc = subprocess.Popen(cmd, stdout=out,
@@ -79,7 +80,7 @@ def run_trial(trial) -> float:
                     if r["step"] in seen:
                         continue
                     seen.add(r["step"])
-                    obj = r["cont_mse_ratio"]
+                    obj = r.get("disp_mse_ratio_k4", r["cont_mse_ratio"])
                     best = min(best, obj)
                     trial.report(obj, r["step"])
             if trial.should_prune():
@@ -102,7 +103,8 @@ def run_trial(trial) -> float:
             r = json.loads(line)
             if r["step"] not in seen:
                 seen.add(r["step"])
-                best = min(best, r["cont_mse_ratio"])
+                best = min(best, r.get("disp_mse_ratio_k4",
+                                       r["cont_mse_ratio"]))
     if best == float("inf"):
         raise optuna.TrialPruned("no validation recorded")
     return best
@@ -114,6 +116,7 @@ def main() -> int:
     from optuna.samplers import TPESampler
 
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", default="pi05_roboeval_all")
     ap.add_argument("--n-trials", type=int, default=20)
     ap.add_argument("--timeout-hours", type=float, default=None)
     ap.add_argument("--dry-run", action="store_true")
@@ -135,7 +138,8 @@ def main() -> int:
         sampler=TPESampler(seed=0, multivariate=True),
         pruner=MedianPruner(n_startup_trials=4, n_warmup_steps=2),
         storage=f"sqlite:///{HPO_DIR}/study.db",
-        study_name="HPO01_pr8", load_if_exists=True)
+        study_name="HPO01_" + args.config.replace("pi05_roboeval_", ""),
+        load_if_exists=True)
 
     def record(study, trial):
         with open(HPO_DIR / "trials.tsv", "a") as f:
@@ -143,7 +147,9 @@ def main() -> int:
                 str(trial.number), str(trial.state.name),
                 str(trial.value), json.dumps(trial.params)]) + "\n")
 
-    study.optimize(run_trial, n_trials=args.n_trials,
+    import functools
+    study.optimize(functools.partial(run_trial, config=args.config),
+                   n_trials=args.n_trials,
                    timeout=(args.timeout_hours * 3600
                             if args.timeout_hours else None),
                    callbacks=[record])
