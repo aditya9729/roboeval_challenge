@@ -151,7 +151,7 @@ class SubmissionPolicyTests(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         for n, want in ((18, "qpos18"), (36, "qpos18_qvel18")):
-            ns = self.ckpt / "assets" / "rid" / "norm_stats.json"
+            ns = self.ckpt / "assets" / "roboeval" / "rid" / "norm_stats.json"
             ns.parent.mkdir(parents=True, exist_ok=True)
             ns.write_text(json.dumps({"norm_stats": {
                 "state": {"q01": [0.0] * n, "q99": [1.0] * n},

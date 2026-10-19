@@ -38,7 +38,8 @@ def _copy_tree(src: Path, dst: Path) -> None:
 
 def _state_mode_from_ckpt(ckpt: Path) -> str:
     """Read the checkpoint's bundled norm_stats.json -> state_mode string."""
-    candidates = sorted(ckpt.glob("assets/*/norm_stats.json"))
+    # openpi layout: assets/<repo_id>/<asset_id>/norm_stats.json
+    candidates = sorted((ckpt / "assets").rglob("norm_stats.json"))
     if not candidates:
         raise FileNotFoundError(
             f"no norm_stats.json under {ckpt}/assets — cannot determine "
