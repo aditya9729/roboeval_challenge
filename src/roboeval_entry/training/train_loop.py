@@ -40,6 +40,8 @@ class ValidationConfig:
     seed: int = 0
     k: int = 4
     enabled: bool = True
+    # checkpoint retention: keep optimizer.pt only in the newest K step dirs
+    keep_optimizer_k: int = 1
 
 
 class PlateauAnnealer:
@@ -400,6 +402,21 @@ def train_loop(config, val_cfg: ValidationConfig | None = None) -> None:
         state_path.write_text(json.dumps(
             {"annealer": annealer.to_dict(), "step": global_step}))
 
+    def prune():
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "prune_checkpoints",
+                Path(__file__).resolve().parents[3]
+                / "scripts" / "prune_checkpoints.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.prune_run_dir(ckpt_dir,
+                              keep_optimizer=val_cfg.keep_optimizer_k,
+                              log=lambda m: logging.info("prune: %s", m))
+        except Exception:
+            logging.exception("checkpoint prune failed")
+
     def maybe_validate() -> bool:
         if validator is None or not (
                 global_step % val_cfg.interval == 0
@@ -426,6 +443,7 @@ def train_loop(config, val_cfg: ValidationConfig | None = None) -> None:
             (ckpt_dir / "best" / "val.json").write_text(json.dumps(
                 {"step": global_step, "objective": objective,
                  "val_loss": res["val_loss"]}))
+            prune()
         elif outcome == "anneal":
             logging.info("plateau: anneal #%d, lr_scale -> %.3f",
                          annealer.anneals, annealer.lr_scale)
@@ -491,6 +509,7 @@ def train_loop(config, val_cfg: ValidationConfig | None = None) -> None:
                 save_step_checkpoint(model, optim,
                                      ckpt_dir / str(global_step), config,
                                      data_config, global_step)
+                prune()
             pbar.update(1)
             if not maybe_validate():
                 logging.info("early stop at step %d (max anneals reached)",
