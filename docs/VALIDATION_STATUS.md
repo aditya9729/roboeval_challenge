@@ -17,3 +17,7 @@
 - No official validation, packaging of a trained policy, organizer approval, or challenge submission occurred.
 
 The ZIP is an implementation handoff, not a competition submission. Shell wrappers need the pinned official environment on the agent's host. The reference sampler is an SGS-inspired utility, not a reproduction of the published algorithm's full system.
+
+## Update — October 20, 2026
+
+Superseded by `docs/HANDOVER_2026-10-20.md`. Current test state: 114 tests, 102 pass, 7 errors (pre-existing on HEAD: 6 × image-cache/registry mismatch in `test_parquet_dataset`, 1 × numpy/torch mismatch in `test_serving_inpaint`), 5 skipped. The official evaluator has been run locally on dev seeds (E009/E010); no official submission has been made.
